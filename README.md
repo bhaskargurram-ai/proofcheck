@@ -117,7 +117,7 @@ proofcheck uses **two workflows**. Running untrusted PR code and holding a token
 # reproducers, benchmarks) only ever runs here. The result is uploaded as an
 # artifact; part 2 (proofcheck-comment.yml) posts it.
 #
-# Replace OWNER/proofcheck@v0.1.0 with the action reference you trust
+# Pin bhaskargurram-ai/proofcheck to a release tag, or (stricter) to a full commit SHA
 # (ideally a full commit SHA).
 name: proofcheck
 
@@ -150,7 +150,7 @@ jobs:
 
       # Collect the PR text and referenced issue bodies BEFORE any PR code
       # runs. This is the only step that receives a token (read-only here).
-      - uses: OWNER/proofcheck@v0.1.0  # replace OWNER; pin to a commit SHA for stricter supply-chain safety
+      - uses: bhaskargurram-ai/proofcheck@v0.1.0  # or pin to a commit SHA for stricter supply-chain safety
         with:
           command: context
           github-token: ${{ github.token }}
@@ -162,7 +162,7 @@ jobs:
           python -m pip install -e . pytest
 
       - id: proofcheck
-        uses: OWNER/proofcheck@v0.1.0  # replace OWNER; pin to a commit SHA for stricter supply-chain safety
+        uses: bhaskargurram-ai/proofcheck@v0.1.0  # or pin to a commit SHA for stricter supply-chain safety
         with:
           command: run
           fail-on: never   # or "contradicted" to fail the check
@@ -239,7 +239,7 @@ jobs:
           echo "number=$pr" >> "$GITHUB_OUTPUT"
 
       # The action installs proofcheck from its own (trusted) source, never from the PR.
-      - uses: OWNER/proofcheck@v0.1.0  # replace OWNER; pin to a commit SHA for stricter supply-chain safety
+      - uses: bhaskargurram-ai/proofcheck@v0.1.0  # or pin to a commit SHA for stricter supply-chain safety
         with:
           command: comment
           result: ${{ runner.temp }}/proofcheck-artifact/result.json

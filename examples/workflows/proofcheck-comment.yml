@@ -55,7 +55,7 @@ jobs:
           echo "number=$pr" >> "$GITHUB_OUTPUT"
 
       # The action installs proofcheck from its own (trusted) source, never from the PR.
-      - uses: OWNER/proofcheck@v0.1.0  # replace OWNER; pin to a commit SHA for stricter supply-chain safety
+      - uses: bhaskargurram-ai/proofcheck@v0.1.0  # or pin to a commit SHA for stricter supply-chain safety
         with:
           command: comment
           result: ${{ runner.temp }}/proofcheck-artifact/result.json
