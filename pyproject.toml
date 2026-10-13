@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Evidence, not authorship: check whether a pull request actually does what it claims."
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Bhaskar Gurram", email = "bhaskargurram.g123@gmail.com" }]
+authors = [{ name = "Bhaskar Gurram", email = "gurrambhaskar.ai@gmail.com" }]
 requires-python = ">=3.10"
 keywords = ["github-action", "pull-request", "code-review", "testing", "fail-to-pass", "maintainers"]
 classifiers = [
