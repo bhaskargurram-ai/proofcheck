@@ -79,6 +79,11 @@ def main() -> None:
     PR's claims to the evidence.
     """
 
+# `proofcheck agent ...` (experimental): see proofcheck/agent/cli.py and docs/AGENT.md.
+from .agent.cli import agent as _agent_group  # noqa: E402
+
+main.add_command(_agent_group)
+
 
 @main.command("run")
 @click.option("--repo", default=".", show_default=True, type=click.Path(exists=True, file_okay=False), help="Git repository.")
