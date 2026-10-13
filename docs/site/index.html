@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>proofcheck: evidence, not authorship</title>
+<meta name="description" content="proofcheck is a GitHub Action and CLI that checks whether a pull request does what it claims: it runs the PR's tests on base and head, replays the issue's reproducer, and matches each claim to the evidence.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cline x1='46' y1='46' x2='58' y2='58' stroke='%2316201b' stroke-width='8' stroke-linecap='round'/%3E%3Ccircle cx='28' cy='28' r='22' fill='%23dafbe1' stroke='%2316201b' stroke-width='6'/%3E%3Cpolyline points='17,29 25,37 39,21' fill='none' stroke='%231a7f37' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --paper: #f3f5f4;
+    --surface: #ffffff;
+    --ink: #16201b;
+    --muted: #55625c;
+    --rule: #d5dcd8;
+    --proof: #1a7f37;
+    --proof-soft: #dafbe1;
+    --fail: #c4252f;
+    --fail-soft: #ffebe9;
+    --warn: #8a5d00;
+    --warn-soft: #fff4c2;
+    --code-bg: #e9eeeb;
+    --focus: #0969da;
+    --sans: -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0d1117;
+      --surface: #151b23;
+      --ink: #e8eef0;
+      --muted: #97a39f;
+      --rule: #2d353e;
+      --proof: #3fb950;
+      --proof-soft: #12301c;
+      --fail: #f85149;
+      --fail-soft: #3c1618;
+      --warn: #d29922;
+      --warn-soft: #3a2b0c;
+      --code-bg: #1b222b;
+      --focus: #4493f8;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: 24px; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
+  a:hover { text-decoration-color: var(--proof); }
+  a:focus-visible, .btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
+  code, pre { font-family: var(--mono); font-size: 0.88em; }
+  :not(pre) > code { background: var(--code-bg); padding: 0.1em 0.38em; border-radius: 5px; white-space: nowrap; }
+  img { max-width: 100%; height: auto; display: block; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+  /* header */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 750; font-size: 19px; letter-spacing: -0.01em; text-decoration: none; }
+  .brand svg { width: 30px; height: 30px; flex: none; }
+  .brand .lens { fill: var(--proof-soft); stroke: var(--ink); }
+  .brand .handle { stroke: var(--ink); }
+  .brand .tick { stroke: var(--proof); }
+  nav ul { list-style: none; display: flex; gap: 22px; margin: 0; padding: 0; font-size: 15px; }
+  nav a { text-decoration: none; color: var(--muted); }
+  nav a:hover { color: var(--ink); }
+  @media (max-width: 760px) { nav li:not(.gh) { display: none; } }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 56px; align-items: center; padding-block: 56px 72px; }
+  @media (max-width: 900px) { .hero { grid-template-columns: minmax(0, 1fr); gap: 40px; padding-block: 28px 56px; } }
+  h1 {
+    font-size: clamp(2.5rem, 6.2vw, 4.6rem);
+    line-height: 1.0;
+    letter-spacing: -0.035em;
+    font-weight: 800;
+    margin: 0 0 24px;
+    text-wrap: balance;
+  }
+  .lede { font-size: 1.2rem; line-height: 1.55; color: var(--muted); max-width: 34em; margin: 0 0 32px; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 20px; border-radius: 10px; font-weight: 650; font-size: 16px; text-decoration: none;
+    border: 1.5px solid var(--ink);
+  }
+  .btn.primary { background: var(--ink); color: var(--paper); }
+  .btn.primary:hover { background: var(--proof); border-color: var(--proof); color: #fff; }
+  .btn.ghost:hover { border-color: var(--proof); color: var(--proof); }
+  .status { margin: 20px 0 0; font-size: 14px; color: var(--muted); }
+
+  /* the measured-evidence ledger */
+  .ledger {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 16px;
+    padding: 8px 0 0;
+    box-shadow: 0 1px 0 var(--rule), 0 24px 48px -32px rgba(10, 30, 20, 0.35);
+    overflow: hidden;
+  }
+  .ledger-cap { display: flex; justify-content: space-between; gap: 12px; padding: 14px 22px 12px; font-size: 14px; color: var(--muted); }
+  .ledger-cap b { color: var(--ink); font-weight: 650; }
+  .ledger table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .ledger th { text-align: left; font-weight: 600; color: var(--muted); font-size: 13px; padding: 8px 12px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  .ledger td { padding: 13px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  .ledger th:first-child, .ledger td:first-child { padding-left: 22px; }
+  .ledger th:last-child, .ledger td:last-child { padding-right: 22px; }
+  .ledger td.what code { background: none; padding: 0; font-size: 13px; word-break: break-word; }
+  .ledger .what small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; font-family: var(--sans); }
+  .o { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+  .o.f { color: var(--fail); }
+  .o.p { color: var(--proof); }
+  .o.n { color: var(--muted); }
+  .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 650; white-space: nowrap; }
+  .chip.ok { background: var(--proof-soft); color: var(--proof); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.no { background: var(--fail-soft); color: var(--fail); }
+  .verdict { display: flex; align-items: center; gap: 12px; padding: 16px 22px 18px; font-size: 15px; }
+  .verdict .claim { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+  @media (max-width: 520px) {
+    .ledger th.hide-s, .ledger td.hide-s { display: none; }
+    .ledger td, .ledger th { padding-left: 8px; padding-right: 8px; }
+  }
+
+  /* sections */
+  section { padding: 72px 0; border-top: 1px solid var(--rule); }
+  @media (max-width: 600px) { section { padding: 52px 0; } }
+  h2 { font-size: clamp(1.7rem, 3.4vw, 2.3rem); line-height: 1.15; letter-spacing: -0.025em; font-weight: 780; margin: 0 0 16px; max-width: 24em; text-wrap: balance; }
+  h3 { font-size: 1.08rem; line-height: 1.35; margin: 0 0 6px; font-weight: 700; letter-spacing: -0.005em; }
+  .intro { color: var(--muted); max-width: 40em; margin: 0 0 36px; font-size: 1.06rem; }
+  .intro strong { color: var(--ink); font-weight: 600; }
+
+  figure { margin: 0; }
+  figcaption { color: var(--muted); font-size: 14.5px; margin-top: 12px; max-width: 46em; }
+  .diagram { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 14px; }
+  .diagram img { width: 100%; min-width: 760px; }
+  .shot {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; padding: 14px;
+    max-width: 860px;
+  }
+  .shot img { border-radius: 8px; }
+
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 48px; margin-top: 40px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .grid > div { padding: 20px 0; border-top: 1px solid var(--rule); }
+  .grid p { margin: 0; color: var(--muted); }
+  .tag { font-size: 12.5px; font-weight: 650; color: var(--muted); border: 1px solid var(--rule); border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: 2px; }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; margin-top: 40px; }
+  @media (max-width: 860px) { .split { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+  .points { list-style: none; margin: 0; padding: 0; }
+  .points li { padding: 14px 0 14px 28px; border-top: 1px solid var(--rule); position: relative; color: var(--muted); }
+  .points li strong { color: var(--ink); font-weight: 650; }
+  .points li::before { content: ""; position: absolute; left: 4px; top: 23px; width: 10px; height: 10px; border-radius: 50%; background: var(--proof); }
+  .points.warn li::before { background: var(--warn); }
+
+  .figure-big { font-size: clamp(3rem, 7vw, 4.8rem); font-weight: 800; letter-spacing: -0.04em; line-height: 1; margin: 0 0 8px; }
+  .stat p { color: var(--muted); margin: 0; max-width: 28em; }
+  .stat .figure-big { color: var(--ink); margin: 0 0 12px; }
+
+  /* quick start */
+  ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; max-width: 780px; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 0 0 36px 56px; }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: 0; top: -2px;
+    width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--ink);
+    display: grid; place-items: center; font-weight: 750; font-size: 15px;
+  }
+  ol.steps > li:not(:last-child)::after { content: ""; position: absolute; left: 17px; top: 40px; bottom: 8px; width: 1.5px; background: var(--rule); }
+  ol.steps p { margin: 0 0 12px; color: var(--muted); }
+  pre {
+    margin: 0 0 12px; padding: 16px 18px; border-radius: 10px; background: var(--surface); border: 1px solid var(--rule);
+    overflow-x: auto; line-height: 1.55; font-size: 14px;
+  }
+  pre .c { color: var(--muted); }
+  details { border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); margin: 0 0 10px; }
+  summary { cursor: pointer; padding: 12px 16px; font-weight: 650; font-size: 15px; }
+  summary code { font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+  details pre { margin: 0 12px 12px; border: none; background: var(--code-bg); }
+  details[open] summary { border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
+
+  /* footer */
+  footer { border-top: 1px solid var(--rule); padding: 40px 0 56px; color: var(--muted); font-size: 15px; }
+  .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 24px; }
+  .foot ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .ledger .o.p, .ledger .chip { animation: settle 700ms 250ms both cubic-bezier(.2,.7,.2,1); }
+    @keyframes settle { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+</head>
+<body>
+
+<header class="wrap top">
+  <a class="brand" href="./" aria-label="proofcheck home">
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <line class="handle" x1="46" y1="46" x2="58" y2="58" stroke-width="8" stroke-linecap="round"/>
+      <circle class="lens" cx="28" cy="28" r="22" stroke-width="5.5"/>
+      <polyline class="tick" points="17,29 25,37 39,21" fill="none" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    proofcheck
+  </a>
+  <nav aria-label="Sections">
+    <ul>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#agent">Agent</a></li>
+      <li><a href="#start">Quick start</a></li>
+      <li class="gh"><a href="https://github.com/bhaskargurram-ai/proofcheck">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <h1>Evidence, not authorship.</h1>
+      <p class="lede">proofcheck checks whether a pull request <strong>does what it claims</strong>. It runs the PR's tests before and after the change, replays the linked issue's reproducer, and matches every claim in the description to what it measured. It never guesses who, or what, wrote the code.</p>
+      <div class="actions">
+        <a class="btn primary" href="#start">Set it up</a>
+        <a class="btn ghost" href="https://github.com/bhaskargurram-ai/proofcheck">View on GitHub</a>
+      </div>
+      <p class="status">Version 0.2.0, MIT licensed. Python first; the agent is experimental.</p>
+    </div>
+
+    <div class="ledger" role="figure" aria-label="Example: for a PR that says Fixes #12, one changed test fails on base and passes on head, the issue's reproducer changes from exit 1 to exit 0, and a second test passes on both, so it is not evidence. The claim is verified.">
+      <div class="ledger-cap"><span>PR description: <b>“Fixes #12. Adds a regression test.”</b></span></div>
+      <table>
+        <thead>
+          <tr><th scope="col">Evidence</th><th scope="col">Base</th><th scope="col">Head</th><th scope="col" class="hide-s">Counts as</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="what"><code>test_repeated_whitespace</code><small>changed by the PR</small></td>
+            <td><span class="o f">failed</span></td>
+            <td><span class="o p">passed</span></td>
+            <td class="hide-s"><span class="chip ok">fail → pass</span></td>
+          </tr>
+          <tr>
+            <td class="what"><code>issue #12 snippet</code><small>from the linked issue</small></td>
+            <td><span class="o f">exit 1</span></td>
+            <td><span class="o p">exit 0</span></td>
+            <td class="hide-s"><span class="chip ok">changed</span></td>
+          </tr>
+          <tr>
+            <td class="what"><code>test_three_words</code><small>changed by the PR</small></td>
+            <td><span class="o n">passed</span></td>
+            <td><span class="o n">passed</span></td>
+            <td class="hide-s"><span class="chip warn">no evidence</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="verdict"><span class="claim">fixes #12</span><span class="chip ok">verified</span></div>
+    </div>
+  </div>
+
+  <section id="card">
+    <div class="wrap">
+      <h2>One comment that shows its work</h2>
+      <p class="intro">Every claim gets a verdict and the evidence behind it. <strong>⚠️ means no evidence, not wrong</strong>: often the fix is just a test that fails before the change. The comment is updated in place and the PR gets a label: <code>verified</code>, <code>partial</code>, <code>contradicted</code> or <code>no evidence</code>.</p>
+      <figure class="shot">
+        <a href="assets/proof-card.png"><img src="assets/proof-card.png" width="1880" height="1958" loading="lazy" alt="A proof card on a real pull request: 'fixes #1' verified by five tests that fail on base and pass on head plus the issue's reproducer; 'adds regression tests' verified; 'backwards compatible' marked no evidence."></a>
+      </figure>
+      <p class="intro" style="margin-top:16px;font-size:14.5px">A real card, posted by proofcheck on one of its own pull requests. It also caught a bug in proofcheck: quoted example phrases were being counted as claims.</p>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>Claims on one side, measured evidence on the other</h2>
+      <p class="intro">proofcheck checks out the base and the head of the PR as separate git worktrees and gathers evidence from up to four sources. Fixed rules, not a model, decide each verdict.</p>
+      <figure>
+        <div class="diagram"><img src="assets/how-it-works.svg" width="1000" height="400" alt="A pull request's description, diff and linked issue feed four evidence sources: changed tests on base and head, issue reproducer replay, the diff evidence map, and an opt-in agent reproduction test. Claims parsed from the description are matched to the evidence and posted as a proof card with a label."></div>
+      </figure>
+      <div class="grid">
+        <div>
+          <h3>Changed tests on base and head</h3>
+          <p>The PR's new tests run against the old code and the new code. A test that fails before and passes after exercises the change; one that passes on both doesn't, however plausible it looks.</p>
+        </div>
+        <div>
+          <h3>Issue reproducer replay</h3>
+          <p>Python snippets and <code>&gt;&gt;&gt;</code> sessions from the linked issue run on both commits, with a timeout and a scrubbed environment. proofcheck records whether the behaviour changed.</p>
+        </div>
+        <div>
+          <h3>Diff evidence map</h3>
+          <p>Each changed hunk is undone in turn and the evidence rerun. Hunks the tests depend on are <em>required</em>; hunks nothing depends on get a scope note, which is a good way to spot unrelated changes.</p>
+        </div>
+        <div>
+          <h3>Agent reproduction test <span class="tag">opt-in</span></h3>
+          <p>When “fixes #N” still has no evidence, an LLM can write a candidate test. proofcheck runs it on base and head itself and keeps it only if it fails, then passes.</p>
+        </div>
+      </div>
+      <figure style="margin-top:56px">
+        <div class="diagram"><img src="assets/evidence-ladder.svg" width="1000" height="484" loading="lazy" alt="The evidence ladder from strongest to weakest: the PR's own test fails then passes; the issue's reproducer behaves differently; an agent-written test fails then passes; a changed hunk is required by that evidence. Below the line, no evidence: a test that passes on both, or no tests at all."></div>
+        <figcaption>Not all evidence is equal. The card says which kind it found, and stops short of “wrong” when it found none.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="security">
+    <div class="wrap">
+      <h2>Built for pull requests from strangers</h2>
+      <p class="intro">Running PR code is the dangerous part. proofcheck splits the work into three trust zones that only pass artifacts to each other, so <strong>no job both runs PR code and holds a secret or a write token</strong>.</p>
+      <figure>
+        <div class="diagram"><img src="assets/security-model.svg" width="1000" height="550" loading="lazy" alt="Three trust zones. Evidence: runs PR code with a read-only token and no secrets. Agent: the propose job holds the LLM key but never executes code; the verify job runs code with no secrets. Comment: holds a write token, never checks out PR code, and re-renders the card from validated JSON."></div>
+      </figure>
+      <div class="split">
+        <ul class="points">
+          <li><strong>Evidence job.</strong> Runs on <code>pull_request</code> with a read-only token, no secrets, <code>persist-credentials: false</code>, timeouts, and config read from the base commit.</li>
+          <li><strong>Agent jobs.</strong> The job with the LLM key reads files as data through git and never runs them. Candidate tests run in a separate job, on a separate VM, with no secrets.</li>
+          <li><strong>Comment job.</strong> Never checks out PR code. It validates the artifact, checks the head SHA, re-renders the card from JSON and escapes all PR text.</li>
+        </ul>
+        <ul class="points warn">
+          <li><strong>Not a sandbox.</strong> A malicious PR can still tamper with its own evidence inside the unprivileged job. proofcheck raises the cost of low-effort PRs; it doesn't stop a determined attacker.</li>
+          <li><strong>Never <code>pull_request_target</code> with a PR checkout.</strong> That pattern runs attacker code with a write token and your secrets.</li>
+          <li>Read the full threat model in <a href="https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/SECURITY_MODEL.md">SECURITY_MODEL.md</a>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="agent">
+    <div class="wrap">
+      <h2>An agent that writes the missing test, and admits when it can't</h2>
+      <p class="intro">Many PRs say “Fixes #123” with no test. The experimental agent tries to write one. It is <strong>off by default</strong>, and its tests can only ever add evidence: they never mark a PR as wrong.</p>
+      <figure>
+        <div class="diagram"><img src="assets/agent-loop.svg" width="1000" height="330" loading="lazy" alt="The agent loop: localize with read-only tools, three prompt variants, static checks and import repair, then a separate job with no secrets runs each candidate on base and head. Fail to pass marks the claim verified (agent test); anything else means no evidence found, never contradicted."></div>
+      </figure>
+      <div class="split">
+        <div class="stat">
+          <p class="figure-big">~1 in 3</p>
+          <p>issues get a working fail-to-pass test in published research on this approach (Otter / Otter++, <a href="https://arxiv.org/abs/2502.05368">arXiv:2502.05368</a>: about 31–37 %). We haven't benchmarked proofcheck's agent, so expect it to come back empty-handed often. Each card records the model, variants tried, tokens and cost.</p>
+        </div>
+        <ul class="points">
+          <li><strong>Read-only tools.</strong> <code>read_file</code>, <code>grep</code>, <code>get_diff</code>, <code>list_tests</code> and friends, all via git. No write, exec or network tools.</li>
+          <li><strong>Different prompts, not more samples.</strong> <code>reproduce-issue</code>, <code>exercise-diff</code> and <code>mimic-existing-tests</code> each take a different angle.</li>
+          <li><strong>Keep what works.</strong> A winning test appears on the card, ready to commit, so the evidence outlives the bot.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="wrap">
+      <h2>Set it up in three steps</h2>
+      <p class="intro"><code>proofcheck init</code> writes small caller workflows that point at reusable workflows in the proofcheck repository.</p>
+      <ol class="steps">
+        <li>
+          <h3>Install</h3>
+          <pre><code>pip install proofcheck   <span class="c"># once 0.2.0 is on PyPI</span>
+pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v0.2.0"</code></pre>
+        </li>
+        <li>
+          <h3>Generate the workflows</h3>
+          <p>From your repository root. It detects pytest, Jest or unittest, writes the workflows and a commented <code>proofcheck.toml</code>, and won't overwrite files without <code>--force</code>.</p>
+          <pre><code>proofcheck init           <span class="c"># add --agent for the experimental agent</span></code></pre>
+          <details>
+            <summary><code>.github/workflows/proofcheck.yml</code>: gather evidence</summary>
+<pre><code>name: proofcheck
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+  issues: read
+jobs:
+  evidence:
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v0.2.0
+    with:
+      python-version: "3.12"
+      install-command: pip install -e ".[dev]"</code></pre>
+          </details>
+          <details>
+            <summary><code>.github/workflows/proofcheck-comment.yml</code>: post the card</summary>
+<pre><code>name: proofcheck comment
+on:
+  workflow_run:
+    workflows: ["proofcheck", "proofcheck agent"]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  issues: write
+jobs:
+  comment:
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    with:
+      labels: true</code></pre>
+          </details>
+          <details>
+            <summary><code>.github/workflows/proofcheck-agent.yml</code>: optional agent</summary>
+<pre><code>name: proofcheck agent
+on:
+  workflow_run:
+    workflows: ["proofcheck"]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+jobs:
+  agent:
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v0.2.0
+    with:
+      llm-provider: anthropic   <span class="c"># or openai</span>
+      llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
+    secrets:
+      llm-api-key: ${{ secrets.PROOFCHECK_LLM_API_KEY }}</code></pre>
+          </details>
+        </li>
+        <li>
+          <h3>Open a pull request</h3>
+          <p>The card appears in the run's job summary right away, and as a PR comment with a label once the comment workflow runs. For the agent, add a <code>PROOFCHECK_LLM_API_KEY</code> secret and a <code>PROOFCHECK_LLM_MODEL</code> variable first.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>proofcheck is MIT licensed, by Bhaskar Gurram.</span>
+    <ul>
+      <li><a href="https://github.com/bhaskargurram-ai/proofcheck">Source on GitHub</a></li>
+      <li><a href="https://github.com/bhaskargurram-ai/proofcheck#readme">README</a></li>
+      <li><a href="https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/SECURITY_MODEL.md">Security model</a></li>
+      <li><a href="https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/AGENT.md">Agent docs</a></li>
+      <li><a href="https://github.com/bhaskargurram-ai/proofcheck/blob/main/CHANGELOG.md">Changelog</a></li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>
