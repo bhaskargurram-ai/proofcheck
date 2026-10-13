@@ -248,6 +248,21 @@ class InitTest(unittest.TestCase):
         self.assertIn("PROOFCHECK_LLM_API_KEY", steps)
         self.assertIn("PROOFCHECK_LLM_MODEL", steps)
 
+    def test_agent_flag_enables_agent_in_config(self):
+        # proofcheck-agent.yml only proposes tests when [agent] is enabled, so
+        # `init --agent` must enable it; plain `init` must leave it off.
+        from proofcheck.agent.config import parse_agent_config
+        from proofcheck.config import tomllib
+
+        with_agent, without = tmpdir(self), tmpdir(self)
+        init_repo(with_agent, agent=True)
+        init_repo(without)
+        on = tomllib.loads((with_agent / CONFIG_PATH).read_text())
+        off = tomllib.loads((without / CONFIG_PATH).read_text())
+        self.assertTrue(parse_agent_config(on.get("agent"), "proofcheck.toml").enabled)
+        self.assertFalse(parse_agent_config(off.get("agent"), "proofcheck.toml").enabled)
+        self.assertIsNotNone(parse_config_text((with_agent / CONFIG_PATH).read_text(), "proofcheck.toml"))
+
     def test_cli_and_bad_ref(self):
         d = tmpdir(self)
         (d / "package.json").write_text(json.dumps({"devDependencies": {"jest": "29"}}))

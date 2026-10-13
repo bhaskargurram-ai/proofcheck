@@ -236,8 +236,8 @@ jobs:
 """
 
 
-def config_template(runner: str) -> str:
-    return f"""# proofcheck configuration (https://github.com/{TOOL_REPOSITORY}).
+def config_template(runner: str, agent: bool = False) -> str:
+    text = f"""# proofcheck configuration (https://github.com/{TOOL_REPOSITORY}).
 #
 # Read from the pull request's BASE commit, so a PR cannot weaken its own
 # check. Every key is optional; the commented values are the defaults.
@@ -275,6 +275,11 @@ time_budget_s = 300
 # when = "missing-evidence"         # or "always"
 # test_dir = "tests/proofcheck_agent"
 """
+    if agent:
+        # proofcheck-agent.yml only proposes tests when [agent] is enabled in the
+        # base commit's config, so `init --agent` must switch it on.
+        text = text.replace("# [agent]  ", "[agent]    ", 1).replace("# enabled = false\n# variants", "enabled = true\n# variants", 1)
+    return text
 
 
 # --------------------------------------------------------------------------- init
@@ -295,7 +300,7 @@ def init_repo(repo: str | Path = ".", agent: bool = False, force: bool = False, 
     files = {
         EVIDENCE_PATH: evidence_caller(ref, detected),
         COMMENT_PATH: comment_caller(ref),
-        CONFIG_PATH: config_template(detected),
+        CONFIG_PATH: config_template(detected, agent=agent),
     }
     if agent:
         files[AGENT_PATH] = agent_caller(ref, detected)
