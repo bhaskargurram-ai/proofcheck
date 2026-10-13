@@ -31,9 +31,9 @@ jobs:
       actions: read
       pull-requests: read
       issues: read
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
       llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
       llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
@@ -50,9 +50,9 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       # Trusted values: the PR number comes from the gate job (API data, no PR
       # code ran there) and the artifact from this run's verify job.
       pr-number: ${{ needs.agent.outputs.pr-number }}

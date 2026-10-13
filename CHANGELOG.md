@@ -4,10 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] - Unreleased
+
+0.2.0 was never released; its changes are part of 1.0.0.
 
 ### Added
 
+- **Rust / cargo runner.** `runner = "cargo"` runs changed integration tests
+  (`<crate>/tests/*.rs`) per target with `cargo test -p <pkg> --test <name>`
+  and parses libtest's stable output. Changed inline `#[cfg(test)]` modules
+  are transplanted from head into the base file with a conservative Rust lexer
+  (comments, raw strings, byte strings, chars vs lifetimes) and run with
+  `--lib`; ambiguous files are skipped with a note instead of guessed. A test
+  target that does not compile on base is reported as such ("build error").
+  A shared `CARGO_TARGET_DIR` lets dependencies compile once across base, head
+  and ablation worktrees. The evidence workflow sets up the repository's Rust
+  toolchain and caches only in the unprivileged pull_request job.
+- **Multi-project repositories.** `[[project]]` tables (`name`, `path`,
+  `runner`, `test_command`, `setup_command`, `test_paths`, `timeout`,
+  `test_env`, `cargo_target_dir`) run each subfolder project's tests from its
+  own directory; test ids are prefixed with the project name when there is
+  more than one. `proofcheck init` detects projects (Python, Jest, cargo
+  workspace roots) and writes the tables. Single-project configs and results
+  are unchanged.
 - **Agent: projects and Rust.** The agent writes its candidates in the
   project whose source the PR mainly changes (`[[project]]` tables), with that
   project's runner, module index, test style and working directory. For cargo
@@ -25,11 +44,16 @@ All notable changes to this project are documented here. The format follows
   timeout defaults to the project's timeout for cargo (1800 s). The reusable
   `agent.yml` workflow gains a `timeout-minutes` input for the verify job
   (default 60, was a fixed 30).
-
-## [0.2.0] - Unreleased
-
-### Added
-
+- **Machine-readable card data:** every card ends with a
+  `<!-- proofcheck:data {...} -->` block (verdict, claims, test, ablation and
+  agent summaries, head SHA) built only from validated fields, with
+  `proofcheck.carddata.parse_card_data()` to read it.
+- **End-to-end harness** (`e2e/`): drives real pull requests in a target
+  repository from scenario folders, waits for the card, checks expectations
+  from its data block and cleans up; a 7-scenario Python set and an offline
+  `--local` mode. See `docs/TESTING.md`.
+- **Packaging CI:** builds the sdist and wheel, runs `twine check`, installs
+  the wheel in a fresh virtualenv and runs the CLI, `init` and the demo.
 - **Agent evidence (experimental, opt-in):** `proofcheck agent propose |
   verify | run | needed`. When a `fixes #N` claim has no deterministic
   evidence, an LLM with read-only, git-plumbing tools (no exec, write or
@@ -88,6 +112,19 @@ All notable changes to this project are documented here. The format follows
   inputs `ablation`, `labels`, `llm-*`, `repo-dir`; the job summary is
   rendered from the validated result instead of `card.md`; branding icon.
 - `docs/SECURITY_MODEL.md` describes the three trust zones.
+
+### Fixed
+
+- Test runs dropped `GIT_CONFIG_KEY_n` (it looks like a secret) but kept
+  `GIT_CONFIG_COUNT`, so every git command inside the tests under check
+  failed. The whole `GIT_CONFIG_*` family is now dropped together.
+- The diff evidence map tested hunks in path order, so on large PRs its cap
+  was spent on configuration files. Source files that the evidence refers to
+  are now tested first, and the summary says how many hunks went untested.
+- `proofcheck init --agent` now enables `[agent]` in `proofcheck.toml`.
+- Issue references that are negated ("does not fix #3"), quoted example
+  phrases, arrow notation ("15.5 s → 0.28 s") and "speeds up X by 2.5x" are
+  handled correctly in claim extraction.
 
 ## [0.1.0] - 2026-10-13
 

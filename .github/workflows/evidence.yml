@@ -5,9 +5,9 @@
 #
 #   jobs:
 #     evidence:
-#       uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v0.2.0
+#       uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0
 #       with:
-#         proofcheck-ref: v0.2.0
+#         proofcheck-ref: v1.0.0
 #
 # Untrusted PR code (install hooks, tests, issue reproducers) runs in this job,
 # so it gets a read-only token and no secrets (for fork PRs GitHub enforces
@@ -39,7 +39,7 @@ on:
       proofcheck-ref:
         description: Tag or commit SHA of proofcheck to install (keep it equal to the @ref of this workflow).
         type: string
-        default: v0.2.0
+        default: v1.0.0
       proofcheck-repository:
         description: Repository proofcheck is installed from.
         type: string

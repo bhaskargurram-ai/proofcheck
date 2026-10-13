@@ -12,7 +12,7 @@
   <a href="https://github.com/bhaskargurram-ai/proofcheck/actions/workflows/ci.yml"><img src="https://github.com/bhaskargurram-ai/proofcheck/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10 to 3.13">
-  <img src="https://img.shields.io/badge/version-0.2.0-informational" alt="Version 0.2.0">
+  <img src="https://img.shields.io/badge/version-1.0.0-informational" alt="Version 1.0.0">
   <img src="https://img.shields.io/badge/agent-experimental-orange" alt="Agent: experimental">
 </p>
 
@@ -24,7 +24,7 @@ It makes no attempt to guess whether a human or an AI wrote the code. It only lo
 </p>
 
 > [!NOTE]
-> **Status: 0.2.0, early.** Python with pytest is the most complete path; a stdlib `unittest` runner is included and Jest is experimental. The agent that writes reproduction tests is **experimental and off by default**. Feedback and runners for other ecosystems are welcome.
+> **Status: 1.0.0.** Supported runners: pytest, stdlib `unittest` and Rust `cargo` (integration tests and inline `#[cfg(test)]` modules), including repositories with several projects in subfolders. Jest is experimental. The agent that writes reproduction tests is **experimental and off by default**. Feedback and runners for other ecosystems are welcome.
 
 ## Contents
 
@@ -81,9 +81,9 @@ A good human PR and a good AI-assisted PR both pass. A sloppy PR from either sou
 ### 1. Install
 
 ```bash
-pip install proofcheck                # once 0.2.0 is published to PyPI
+pip install proofcheck                # once 1.0.0 is published to PyPI
 # or, straight from GitHub:
-pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v0.2.0"
+pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v1.0.0"
 ```
 
 ### 2. Generate the workflows
@@ -98,7 +98,7 @@ proofcheck init            # add --agent to also set up the experimental agent
 
 ### 3. The workflows it writes
 
-proofcheck runs as separate workflows so that untrusted PR code and privileged tokens never share a job ([why](#security-model)). Each caller is a few lines that point at a reusable workflow in this repository. Pin `@v0.2.0`, or a full commit SHA if you want to be strict.
+proofcheck runs as separate workflows so that untrusted PR code and privileged tokens never share a job ([why](#security-model)). Each caller is a few lines that point at a reusable workflow in this repository. Pin `@v1.0.0`, or a full commit SHA if you want to be strict.
 
 **`.github/workflows/proofcheck.yml`** gathers evidence. It is unprivileged and is where PR code runs.
 
@@ -119,9 +119,9 @@ concurrency:
 
 jobs:
   evidence:
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       python-version: "3.12"
       # Installs the project under test; this runs PR code (unprivileged job).
       install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
@@ -147,9 +147,9 @@ jobs:
       contents: read
       actions: read          # download the artifact of the triggering run
       pull-requests: write   # upsert the comment and the verdict label
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       labels: true
 ```
 
@@ -173,9 +173,9 @@ jobs:
       actions: read
       pull-requests: read
       issues: read
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
       llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
       llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
@@ -192,9 +192,9 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       # Trusted values: the PR number comes from the gate job (API data, no PR
       # code ran there) and the artifact from this run's verify job.
       pr-number: ${{ needs.agent.outputs.pr-number }}
@@ -228,7 +228,7 @@ The demo uses pytest when it is installed and otherwise falls back to the stdlib
 <details>
 <summary><b>Use the composite action directly</b></summary>
 
-The `bhaskargurram-ai/proofcheck@v0.2.0` composite action is still available for custom setups. Its `command` input selects `context`, `run`, `summary`, `comment`, `agent-propose` or `agent-verify`. See [`action.yml`](action.yml) and the full examples in [`examples/workflows/`](examples/workflows). The reusable workflows above wrap the same steps and are the recommended setup.
+The `bhaskargurram-ai/proofcheck@v1.0.0` composite action is still available for custom setups. Its `command` input selects `context`, `run`, `summary`, `comment`, `agent-propose` or `agent-verify`. See [`action.yml`](action.yml) and the full examples in [`examples/workflows/`](examples/workflows). The reusable workflows above wrap the same steps and are the recommended setup.
 
 </details>
 
@@ -420,7 +420,7 @@ proofcheck raises the bar for low-effort PRs. It is **not** a sandbox and not a 
 
 Different tools answer different questions. This table is our best reading of each category as of October 2026; corrections are welcome.
 
-| | AI code reviewers<br><sub>e.g. Copilot code review, CodeRabbit, Greptile, Qodo</sub> | Slop detectors<br><sub>e.g. anti-slop, Slopper</sub> | [reprove](https://pypi.org/project/reprove/)<br><sub>0.1.3</sub> | **proofcheck**<br><sub>0.2.0</sub> |
+| | AI code reviewers<br><sub>e.g. Copilot code review, CodeRabbit, Greptile, Qodo</sub> | Slop detectors<br><sub>e.g. anti-slop, Slopper</sub> | [reprove](https://pypi.org/project/reprove/)<br><sub>0.1.3</sub> | **proofcheck**<br><sub>1.0.0</sub> |
 |---|---|---|---|---|
 | Main question | Is this code good? | Is this PR low-effort or AI-generated? | Are the changed lines tested? | **Does the PR do what it claims?** |
 | How | Reads the diff and comments | Scores signals about the PR and author | Executes: diff coverage, mutation testing, LLM hypotheses run as pytest | **Executes:** tests on base and head, issue reproducers, hunk ablation |
@@ -524,7 +524,7 @@ The optional LLM claim extractor sends PR text as untrusted data inside random d
 ## CLI reference
 
 ```text
-proofcheck init      [--repo .] [--agent] [--force] [--ref v0.2.0]
+proofcheck init      [--repo .] [--agent] [--force] [--ref v1.0.0]
 proofcheck context   --out context.json [--max-issues 5]
 proofcheck run       --base REF [--head HEAD] [--repo .] [options]
 proofcheck summary   --json result.json

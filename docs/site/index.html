@@ -230,7 +230,7 @@
         <a class="btn primary" href="#start">Set it up</a>
         <a class="btn ghost" href="https://github.com/bhaskargurram-ai/proofcheck">View on GitHub</a>
       </div>
-      <p class="status">Version 0.2.0, MIT licensed. Python first; the agent is experimental.</p>
+      <p class="status">Version 1.0.0, MIT licensed. Python first; the agent is experimental.</p>
     </div>
 
     <div class="ledger" role="figure" aria-label="Example: for a PR that says Fixes #12, one changed test fails on base and passes on head, the issue's reproducer changes from exit 1 to exit 0, and a second test passes on both, so it is not evidence. The claim is verified.">
@@ -357,8 +357,8 @@
       <ol class="steps">
         <li>
           <h3>Install</h3>
-          <pre><code>pip install proofcheck   <span class="c"># once 0.2.0 is on PyPI</span>
-pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v0.2.0"</code></pre>
+          <pre><code>pip install proofcheck   <span class="c"># once 1.0.0 is on PyPI</span>
+pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v1.0.0"</code></pre>
         </li>
         <li>
           <h3>Generate the workflows</h3>
@@ -382,9 +382,9 @@ concurrency:
 
 jobs:
   evidence:
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       python-version: "3.12"
       install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
       fail-on: never <span class="c">  # or "contradicted" / "no-evidence" to fail the check</span></code></pre>
@@ -407,9 +407,9 @@ jobs:
       contents: read
       actions: read        <span class="c">  # download the artifact of the triggering run</span>
       pull-requests: write <span class="c">  # upsert the comment and the verdict label</span>
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       labels: true</code></pre>
           </details>
           <details>
@@ -431,9 +431,9 @@ jobs:
       actions: read
       pull-requests: read
       issues: read
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
       llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
       llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
@@ -450,9 +450,9 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.0
     with:
-      proofcheck-ref: v0.2.0
+      proofcheck-ref: v1.0.0
       pr-number: ${{ needs.agent.outputs.pr-number }}
       artifact-run-id: ${{ github.run_id }}
       labels: true</code></pre>

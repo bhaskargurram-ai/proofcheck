@@ -223,13 +223,13 @@ class InitTest(unittest.TestCase):
         d = tmpdir(self)
         (d / "tests").mkdir()
         (d / "tests" / "test_a.py").write_text("def test_a(): pass\n")
-        res = init_repo(d, ref="v0.2.0")
+        res = init_repo(d, ref="v1.0.0")
         self.assertEqual(res.runner, "pytest")
         self.assertEqual(res.written, [EVIDENCE_PATH, COMMENT_PATH, CONFIG_PATH])
         self.assertFalse((d / AGENT_PATH).exists())
         ev = (d / EVIDENCE_PATH).read_text()
-        self.assertIn("uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v0.2.0", ev)
-        self.assertIn("proofcheck-ref: v0.2.0", ev)
+        self.assertIn("uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0", ev)
+        self.assertIn("proofcheck-ref: v1.0.0", ev)
         self.assertNotIn("pull_request_target:", ev + (d / COMMENT_PATH).read_text())
         cfg = parse_config_text((d / CONFIG_PATH).read_text(), "proofcheck.toml")
         self.assertEqual((cfg.runner, cfg.ablation.enabled, cfg.ablation.max_hunks), ("pytest", True, 12))
@@ -282,9 +282,9 @@ class InitTest(unittest.TestCase):
 
     def test_examples_match_generated_callers(self):
         ex = _helpers.ROOT / "examples" / "workflows"
-        self.assertEqual((ex / "proofcheck.yml").read_text(), evidence_caller("v0.2.0", "pytest"))
-        self.assertEqual((ex / "proofcheck-comment.yml").read_text(), comment_caller("v0.2.0"))
-        self.assertEqual((ex / "proofcheck-agent.yml").read_text(), agent_caller("v0.2.0", "pytest"))
+        self.assertEqual((ex / "proofcheck.yml").read_text(), evidence_caller("v1.0.0", "pytest"))
+        self.assertEqual((ex / "proofcheck-comment.yml").read_text(), comment_caller("v1.0.0"))
+        self.assertEqual((ex / "proofcheck-agent.yml").read_text(), agent_caller("v1.0.0", "pytest"))
 
 
 if __name__ == "__main__":
