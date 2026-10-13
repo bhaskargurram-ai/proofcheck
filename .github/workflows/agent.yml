@@ -1,0 +1,357 @@
+# proofcheck reusable workflow: agent evidence (EXPERIMENTAL, opt-in).
+#
+# Call it from a workflow triggered by `workflow_run` of the evidence workflow
+# (see `proofcheck init --agent` or examples/workflows/proofcheck-agent.yml).
+# When the evidence run found no proof for a "fixes #N" claim, an LLM agent
+# tries to write a reproduction test; proofcheck then runs it on base and head.
+#
+# Three trust zones, one job each (separate jobs run on separate VMs, so PR
+# code in `verify` cannot read the key from `propose`'s memory or disk):
+#
+#   gate     no PR code, no key. Reads the evidence artifact and the GitHub API
+#            and decides whether the agent should run (see `run-for`).
+#   propose  holds the LLM key. Checks the PR out as DATA only: never installs,
+#            imports, builds or executes it. The model only gets read-only git
+#            tools, and its only output is a schema-validated test file.
+#   verify   runs the candidate tests (PR code + LLM-written code) on base and
+#            head. No secrets are referenced, the token is read-only, no caches.
+#
+# The caller posts the card with comment.yml, passing the gate's `pr-number`
+# output (trusted) and this run's id (see examples/workflows/proofcheck-agent.yml).
+name: proofcheck agent
+
+on:
+  workflow_call:
+    inputs:
+      proofcheck-ref:
+        description: Tag or commit SHA of proofcheck to install (keep it equal to the @ref of this workflow).
+        type: string
+        default: v0.2.0
+      proofcheck-repository:
+        description: Repository proofcheck is installed from.
+        type: string
+        default: bhaskargurram-ai/proofcheck
+      python-version:
+        type: string
+        default: "3.12"
+      node-version:
+        description: Set (e.g. "20") to install Node.js in the verify job.
+        type: string
+        default: ""
+      install-command:
+        description: Installs the project under test in the verify job (runs PR code there, never in propose).
+        type: string
+        default: 'pip install -e ".[dev]" || pip install -e .'
+      llm-provider:
+        description: "anthropic | openai (any OpenAI-compatible endpoint)"
+        type: string
+        default: ""
+      llm-model:
+        description: Model id (required; there is no default model).
+        type: string
+        default: ""
+      llm-base-url:
+        description: Optional API base URL.
+        type: string
+        default: ""
+      run-for:
+        description: >-
+          "trusted" (default): only PRs by OWNER/MEMBER/COLLABORATOR, or labelled `proofcheck:agent`.
+          "everyone": any PR (spends API credits on any fork PR).
+        type: string
+        default: trusted
+      when:
+        description: '"missing-evidence" (default): only when a fixes-claim lacks proof. "always": whenever there is a fixes-claim.'
+        type: string
+        default: missing-evidence
+      label:
+        description: Label that opts a PR in when run-for is "trusted".
+        type: string
+        default: "proofcheck:agent"
+    secrets:
+      llm-api-key:
+        description: API key for the LLM provider. Only the propose job sees it.
+        required: false
+    outputs:
+      pr-number:
+        description: PR number determined by the gate job from the API (trusted).
+        value: ${{ jobs.gate.outputs.pr-number }}
+      verified:
+        description: "'true' when the verify job uploaded a `proofcheck-result` artifact in this run."
+        value: ${{ jobs.verify.outputs.done }}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read          # download the evidence artifact of the triggering run
+      pull-requests: read    # PR head, base, labels, author association
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      pr-number: ${{ steps.decide.outputs.pr-number }}
+      head-sha: ${{ steps.decide.outputs.head-sha }}
+      base-sha: ${{ steps.decide.outputs.base-sha }}
+    steps:
+      - name: Find the evidence artifact
+        id: art
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          n="$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts?name=proofcheck-result" --jq '.total_count')"
+          if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt 0 ]; then echo "found=true" >> "$GITHUB_OUTPUT"; else echo "found=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Download the evidence artifact
+        if: steps.art.outputs.found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: proofcheck-result
+          path: ${{ runner.temp }}/evidence
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Decide whether the agent runs
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ART: ${{ runner.temp }}/evidence
+          FOUND: ${{ steps.art.outputs.found }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HAS_KEY: ${{ secrets.llm-api-key != '' }}
+          HAS_MODEL: ${{ inputs.llm-model != '' }}
+          RUN_FOR: ${{ inputs.run-for }}
+          WHEN: ${{ inputs.when }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          skip() { echo "proofcheck agent: skipped ($1)" | tee -a "$GITHUB_STEP_SUMMARY"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          [ "$HAS_KEY" = "true" ] || skip "no llm-api-key secret configured"
+          [ "$HAS_MODEL" = "true" ] || skip "no llm-model configured"
+          if [ "$FOUND" != "true" ] || [ ! -f "$ART/result.json" ]; then skip "the evidence run produced no result"; fi
+          [ "$(stat -c %s "$ART/result.json")" -le 5000000 ] || skip "result.json is too large"
+          pr="$(head -c 20 "$ART/pr_number" 2>/dev/null | tr -d '[:space:]' || true)"
+          [[ "$pr" =~ ^[0-9]{1,10}$ ]] || skip "the artifact has no valid PR number"
+          # Trusted data from here on: the API, checked against the triggering run's commit.
+          gh api "repos/$REPO/pulls/$pr" > "$RUNNER_TEMP/pr.json"
+          head_sha="$(jq -r '.head.sha' "$RUNNER_TEMP/pr.json")"
+          base_sha="$(jq -r '.base.sha' "$RUNNER_TEMP/pr.json")"
+          state="$(jq -r '.state' "$RUNNER_TEMP/pr.json")"
+          assoc="$(jq -r '.author_association' "$RUNNER_TEMP/pr.json")"
+          labelled="$(jq -r --arg l "$LABEL" '[.labels[].name] | index($l) != null' "$RUNNER_TEMP/pr.json")"
+          [ "$head_sha" = "$RUN_HEAD_SHA" ] || skip "PR #$pr is not at the evaluated commit (updated, or the artifact names another PR)"
+          [ "$state" = "open" ] || skip "PR #$pr is not open"
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || skip "unexpected base SHA"
+          need="$(python3 -I -c '
+          import json, sys
+          try:
+              claims = json.load(open(sys.argv[1], encoding="utf-8")).get("claims") or []
+          except Exception:
+              claims = []
+          fixes = [c for c in claims if isinstance(c, dict) and c.get("type") == "fixes_issue"]
+          if not fixes:
+              print("no-fixes-claim")
+          elif sys.argv[2] == "always" or any(c.get("status") != "verified" for c in fixes):
+              print("needed")
+          else:
+              print("already-verified")
+          ' "$ART/result.json" "$WHEN")"
+          [ "$need" = "needed" ] || skip "$need"
+          case "$assoc" in OWNER|MEMBER|COLLABORATOR) trusted=true ;; *) trusted=false ;; esac
+          if [ "$RUN_FOR" != "everyone" ] && [ "$trusted" != "true" ] && [ "$labelled" != "true" ]; then
+            skip "author is $assoc; a maintainer can add the '$LABEL' label to opt this PR in"
+          fi
+          {
+            echo "run=true"
+            echo "pr-number=$pr"
+            echo "head-sha=$head_sha"
+            echo "base-sha=$base_sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "proofcheck agent: running for PR #$pr at ${head_sha:0:12}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Hand the evidence result to the next jobs
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofcheck-evidence
+          path: ${{ runner.temp }}/evidence/result.json
+          retention-days: 1
+
+  propose:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read           # issue bodies for the context
+      pull-requests: read    # PR title/body for the context
+    outputs:
+      has-candidates: ${{ steps.propose.outputs.has-candidates }}
+    steps:
+      # DATA ONLY: nothing in this checkout is installed, imported or executed.
+      # It lives in pr/ and every output is written outside it, so files or
+      # symlinks in the PR cannot redirect proofcheck's writes.
+      - name: Check out the pull request as data
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.head-sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out proofcheck (trusted tool source)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.proofcheck-repository }}
+          ref: ${{ inputs.proofcheck-ref }}
+          path: .proofcheck-tool
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install proofcheck (isolated virtualenv; never the PR)
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/proofcheck-venv"
+          "$RUNNER_TEMP/proofcheck-venv/bin/python" -m pip install --quiet --disable-pip-version-check ./.proofcheck-tool
+          echo "PROOFCHECK_BIN=$RUNNER_TEMP/proofcheck-venv/bin/proofcheck" >> "$GITHUB_ENV"
+          echo "PC_OUT=$RUNNER_TEMP/proofcheck-out" >> "$GITHUB_ENV"
+
+      - name: Download the evidence result
+        uses: actions/download-artifact@v4
+        with:
+          name: proofcheck-evidence
+          path: ${{ runner.temp }}/proofcheck-out
+
+      - name: Collect PR context from the API
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.gate.outputs.pr-number }}
+        run: '"$PROOFCHECK_BIN" context --pr "$PR_NUMBER" --out "$PC_OUT/context.json"'
+
+      - name: Propose reproduction tests (LLM; read-only git tools; runs no PR code)
+        id: propose
+        env:
+          PROOFCHECK_LLM_PROVIDER: ${{ inputs.llm-provider }}
+          PROOFCHECK_LLM_MODEL: ${{ inputs.llm-model }}
+          PROOFCHECK_LLM_BASE_URL: ${{ inputs.llm-base-url }}
+          PROOFCHECK_LLM_API_KEY: ${{ secrets.llm-api-key }}
+          BASE_SHA: ${{ needs.gate.outputs.base-sha }}
+          HEAD_SHA: ${{ needs.gate.outputs.head-sha }}
+        run: |
+          set -euo pipefail
+          "$PROOFCHECK_BIN" agent propose --repo pr --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --context-file "$PC_OUT/context.json" --result "$PC_OUT/result.json" --out-dir "$PC_OUT/candidates"
+          if [ -f "$PC_OUT/candidates/manifest.json" ]; then echo "has-candidates=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Upload candidates
+        if: steps.propose.outputs.has-candidates == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofcheck-candidates
+          path: ${{ runner.temp }}/proofcheck-out/candidates
+          retention-days: 7
+
+  verify:
+    needs: [gate, propose]
+    if: needs.gate.outputs.run == 'true' && needs.propose.outputs.has-candidates == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # No secrets are referenced in this job, the token is read-only, and no
+    # caches are used (a poisoned cache could leak into trusted jobs).
+    permissions:
+      contents: read
+    outputs:
+      done: ${{ steps.verify.outputs.done }}
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.head-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out proofcheck (trusted tool source)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.proofcheck-repository }}
+          ref: ${{ inputs.proofcheck-ref }}
+          path: .proofcheck-tool
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - uses: actions/setup-node@v4
+        if: inputs.node-version != ''
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install proofcheck (isolated virtualenv)
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/proofcheck-venv"
+          "$RUNNER_TEMP/proofcheck-venv/bin/python" -m pip install --quiet --disable-pip-version-check ./.proofcheck-tool
+          echo "PROOFCHECK_BIN=$RUNNER_TEMP/proofcheck-venv/bin/proofcheck" >> "$GITHUB_ENV"
+
+      - name: Download the evidence result
+        uses: actions/download-artifact@v4
+        with:
+          name: proofcheck-evidence
+          path: proofcheck-out
+
+      - name: Download candidates
+        uses: actions/download-artifact@v4
+        with:
+          name: proofcheck-candidates
+          path: proofcheck-out/candidates
+
+      - name: Install the project under test (runs PR code)
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: |
+          set -euo pipefail
+          eval "$INSTALL_COMMAND"
+
+      - name: Run the candidate tests on base and head (runs PR code; no LLM)
+        id: verify
+        env:
+          BASE_SHA: ${{ needs.gate.outputs.base-sha }}
+          HEAD_SHA: ${{ needs.gate.outputs.head-sha }}
+          PR_NUMBER: ${{ needs.gate.outputs.pr-number }}
+        run: |
+          set -euo pipefail
+          "$PROOFCHECK_BIN" agent verify --repo . --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --candidates proofcheck-out/candidates --result proofcheck-out/result.json \
+            --json proofcheck-out/result.json --out proofcheck-out/card.md
+          echo "$PR_NUMBER" > proofcheck-out/pr_number
+          echo "$HEAD_SHA" > proofcheck-out/head_sha
+          echo "done=true" >> "$GITHUB_OUTPUT"
+
+      - name: Write the proof card to the job summary
+        if: always() && hashFiles('proofcheck-out/result.json') != ''
+        run: '"$PROOFCHECK_BIN" summary --json proofcheck-out/result.json'
+
+      - name: Upload result
+        if: steps.verify.outputs.done == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofcheck-result
+          path: |
+            proofcheck-out/result.json
+            proofcheck-out/card.md
+            proofcheck-out/pr_number
+            proofcheck-out/head_sha
+          retention-days: 7
