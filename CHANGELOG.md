@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Agent evidence (experimental, opt-in):** `proofcheck agent propose |
+  verify | run | needed`. When a `fixes #N` claim has no deterministic
+  evidence, an LLM with read-only, git-plumbing tools (no exec, write or
+  network) proposes reproduction tests through a schema-validated
+  `submit_test` call, using heterogeneous prompt variants
+  (`reproduce-issue`, `exercise-diff`, `mimic-existing-tests`, optional
+  `localize-first`), static validation and Otter-style import repair.
+  `verify` (no LLM, no secrets) runs each candidate on base and head and
+  classifies it as `fail_to_pass`, `fail_to_pass_weak`, `pass_to_pass`,
+  `fails_on_head` (inconclusive) or `error`; a strong candidate upgrades the
+  claim to "verified (agent test)", and agent evidence never yields ❌.
+  Tool-use client for the Anthropic Messages API and OpenAI-compatible chat
+  completions with retries, budgets and token/cost accounting; `[agent]`
+  config table; card section "Agent evidence (experimental)". See
+  `docs/AGENT.md`.
+
 ## [0.1.0] - 2026-10-13
 
 Initial release.
