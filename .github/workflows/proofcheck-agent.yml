@@ -1,0 +1,53 @@
+# proofcheck agent evidence (EXPERIMENTAL, opt-in).
+#
+# Dogfooding caller for the proofcheck repository itself. Other repositories
+# should run `proofcheck init --agent` or copy examples/workflows/proofcheck-agent.yml.
+#
+# Runs from the default branch (`workflow_run`), with proofcheck installed
+# from the default branch commit. It does nothing unless the repository has
+# the PROOFCHECK_LLM_API_KEY secret and the PROOFCHECK_LLM_MODEL variable, and
+# by default only for PRs by owners/members/collaborators or labelled
+# `proofcheck:agent`. See agent.yml for the three-job trust split.
+name: proofcheck agent
+
+on:
+  workflow_run:
+    workflows: ["proofcheck"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  agent:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: read
+    uses: ./.github/workflows/agent.yml
+    with:
+      proofcheck-repository: ${{ github.repository }}
+      proofcheck-ref: ${{ github.sha }}
+      llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
+      llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
+      llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
+      install-command: python -m pip install -e ".[dev]"
+      run-for: trusted
+    secrets:
+      llm-api-key: ${{ secrets.PROOFCHECK_LLM_API_KEY }}
+
+  comment:
+    needs: agent
+    if: needs.agent.outputs.verified == 'true'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: ./.github/workflows/comment.yml
+    with:
+      proofcheck-repository: ${{ github.repository }}
+      proofcheck-ref: ${{ github.sha }}
+      pr-number: ${{ needs.agent.outputs.pr-number }}
+      artifact-run-id: ${{ github.run_id }}
+      labels: true

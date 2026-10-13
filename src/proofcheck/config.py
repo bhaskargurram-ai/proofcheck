@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import shlex
 import sys
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +66,20 @@ class LLMConfig:
     timeout: float = 60
 
 
+DEFAULT_ABLATION_EXCLUDE = ("*.md", "*.rst", "*.txt", "docs/*", "LICENSE*", "CHANGELOG*", ".github/*")
+
+
+@dataclass
+class AblationConfig:
+    """Settings for the diff evidence map (hunk ablation)."""
+
+    enabled: bool = True
+    max_hunks: int = 12
+    time_budget_s: float = 300
+    #: Changed files matching these patterns are not ablated (documentation and similar).
+    exclude: list[str] = field(default_factory=lambda: list(DEFAULT_ABLATION_EXCLUDE))
+
+
 @dataclass
 class Config:
     """Effective proofcheck configuration."""
@@ -86,13 +100,14 @@ class Config:
     repro_python: str = field(default_factory=default_python)
     max_issues: int = 5
     llm: LLMConfig = field(default_factory=LLMConfig)
+    ablation: AblationConfig = field(default_factory=AblationConfig)
     source: str = "defaults"
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for f in fields(self):
             v = getattr(self, f.name)
-            out[f.name] = v.__dict__.copy() if isinstance(v, LLMConfig) else v
+            out[f.name] = v.__dict__.copy() if is_dataclass(v) else v
         return out
 
 
@@ -101,6 +116,7 @@ _SIMPLE_KEYS = {
     "timeout", "benchmark_command", "benchmark_runs", "benchmark_timeout", "large_diff_threshold",
     "max_issues", "repro", "llm",
 }
+_SIMPLE_KEYS |= {"ablation"}
 
 
 def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
@@ -162,7 +178,27 @@ def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
         cfg.llm.timeout = _as_number(llm["timeout"], "llm.timeout", 1)
     if "api_key" in llm:
         raise ConfigError("never put API keys in proofcheck.toml; use the PROOFCHECK_LLM_API_KEY environment variable")
+    _parse_ablation(data.get("ablation", {}), cfg.ablation)
     return cfg
+
+
+def _parse_ablation(section: Any, out: AblationConfig) -> None:
+    """Parse the ``[ablation]`` table into ``out``."""
+    if not isinstance(section, dict):
+        raise ConfigError("[ablation] must be a table")
+    unknown = set(section) - {"enabled", "max_hunks", "time_budget_s", "exclude"}
+    if unknown:
+        raise ConfigError(f"unknown ablation key(s): {', '.join(sorted(unknown))}")
+    if "enabled" in section:
+        if not isinstance(section["enabled"], bool):
+            raise ConfigError("ablation.enabled must be true or false")
+        out.enabled = section["enabled"]
+    if "max_hunks" in section:
+        out.max_hunks = int(_as_number(section["max_hunks"], "ablation.max_hunks", 0))
+    if "time_budget_s" in section:
+        out.time_budget_s = _as_number(section["time_budget_s"], "ablation.time_budget_s", 0)
+    if "exclude" in section:
+        out.exclude = _as_str_list(section["exclude"], "ablation.exclude")
 
 
 def parse_config_text(text: str, source: str, pyproject: bool = False) -> Config | None:

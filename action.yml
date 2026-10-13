@@ -2,7 +2,7 @@ name: proofcheck
 description: "Evidence, not authorship: check whether a pull request actually does what it claims."
 author: Bhaskar Gurram
 branding:
-  icon: check-square
+  icon: check-circle
   color: green
 
 # Security notes (see docs/SECURITY_MODEL.md):
@@ -15,10 +15,16 @@ branding:
 # * `command: comment` is meant for the privileged workflow_run workflow. It
 #   never checks out or runs PR code; it validates result.json and re-renders
 #   the card from it.
+# * `command: summary` renders the card from result.json into the job summary
+#   (no token needed, works for fork PRs).
+# * `command: agent-propose` holds the LLM key: use it only in a job that
+#   never installs or runs PR code. `command: agent-verify` runs PR code: use
+#   it only in a job without secrets. See .github/workflows/agent.yml, which
+#   already does this and is the recommended way to run the agent.
 
 inputs:
   command:
-    description: "One of: context, run, comment."
+    description: "One of: context, run, comment, summary, agent-propose, agent-verify."
     required: false
     default: run
   base:
@@ -49,6 +55,34 @@ inputs:
     description: "run: never | contradicted | no-evidence"
     required: false
     default: never
+  ablation:
+    description: "run: 'true' or 'false' to force the diff evidence map on or off. Default: from config (on)."
+    required: false
+    default: ""
+  labels:
+    description: "comment: 'true' to also set a `proofcheck: <verdict>` label (needs pull-requests: write)."
+    required: false
+    default: "false"
+  llm-provider:
+    description: "agent-propose: anthropic | openai."
+    required: false
+    default: ""
+  llm-model:
+    description: "agent-propose: model id (required for the agent; there is no default)."
+    required: false
+    default: ""
+  llm-base-url:
+    description: "agent-propose: optional API base URL."
+    required: false
+    default: ""
+  llm-api-key:
+    description: "agent-propose: API key. Pass a secret; never use it in a job that runs PR code."
+    required: false
+    default: ""
+  repo-dir:
+    description: "agent-propose / agent-verify: directory of the PR checkout."
+    required: false
+    default: "."
   output-dir:
     description: "Directory for context.json, card.md, result.json and pr_number."
     required: false
@@ -118,6 +152,7 @@ runs:
         PC_TEST_COMMAND: ${{ inputs.test-command }}
         PC_CONFIG: ${{ inputs.config }}
         PC_FAIL_ON: ${{ inputs.fail-on }}
+        PC_ABLATION: ${{ inputs.ablation }}
         PROOFCHECK_PYTHON: ${{ inputs.python }}
         OUT_DIR: ${{ inputs.output-dir }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -129,13 +164,15 @@ runs:
         [ -n "$PC_TEST_COMMAND" ] && args+=(--test-command "$PC_TEST_COMMAND")
         [ -n "$PC_CONFIG" ] && args+=(--config "$PC_CONFIG")
         [ -f "$OUT_DIR/context.json" ] && args+=(--context-file "$OUT_DIR/context.json")
+        [ "$PC_ABLATION" = "true" ] && args+=(--ablation)
+        [ "$PC_ABLATION" = "false" ] && args+=(--no-ablation)
         status=0
         "$PROOFCHECK_BIN" "${args[@]}" || status=$?
         if [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then echo "$PR_NUMBER" > "$OUT_DIR/pr_number"; fi
         if [ -f "$OUT_DIR/result.json" ]; then
           verdict="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["verdict"])' "$OUT_DIR/result.json")"
           echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
-          cat "$OUT_DIR/card.md" >> "$GITHUB_STEP_SUMMARY"
+          "$PROOFCHECK_BIN" summary --json "$OUT_DIR/result.json" || true
         fi
         exit "$status"
 
@@ -147,6 +184,7 @@ runs:
         PC_RESULT: ${{ inputs.result }}
         PC_PR: ${{ inputs.pr-number }}
         PC_HEAD_SHA: ${{ inputs.expected-head-sha }}
+        PC_LABELS: ${{ inputs.labels }}
       run: |
         set -euo pipefail
         if ! [[ "$PC_PR" =~ ^[0-9]{1,10}$ ]]; then
@@ -157,4 +195,49 @@ runs:
           if ! [[ "$PC_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo "::error::invalid expected-head-sha"; exit 1; fi
           args+=(--expect-head-sha "$PC_HEAD_SHA")
         fi
+        if [ "$PC_LABELS" = "true" ]; then args+=(--labels); fi
         "$PROOFCHECK_BIN" "${args[@]}"
+
+    - name: Write the proof card to the job summary
+      if: inputs.command == 'summary'
+      shell: bash
+      env:
+        PC_RESULT: ${{ inputs.result }}
+      run: |
+        set -euo pipefail
+        "$PROOFCHECK_BIN" summary --json "$PC_RESULT"
+
+    - name: Propose agent reproduction tests (holds the LLM key; never runs PR code)
+      if: inputs.command == 'agent-propose'
+      shell: bash
+      env:
+        PROOFCHECK_LLM_PROVIDER: ${{ inputs.llm-provider }}
+        PROOFCHECK_LLM_MODEL: ${{ inputs.llm-model }}
+        PROOFCHECK_LLM_BASE_URL: ${{ inputs.llm-base-url }}
+        PROOFCHECK_LLM_API_KEY: ${{ inputs.llm-api-key }}
+        PC_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        PC_HEAD: ${{ inputs.head || github.event.pull_request.head.sha }}
+        PC_REPO: ${{ inputs.repo-dir }}
+        OUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$OUT_DIR"
+        args=(agent propose --repo "$PC_REPO" --base "$PC_BASE" --head "$PC_HEAD" --out-dir "$OUT_DIR/candidates")
+        [ -f "$OUT_DIR/context.json" ] && args+=(--context-file "$OUT_DIR/context.json")
+        [ -f "$OUT_DIR/result.json" ] && args+=(--result "$OUT_DIR/result.json")
+        "$PROOFCHECK_BIN" "${args[@]}"
+
+    - name: Verify agent reproduction tests (runs PR code; use without secrets)
+      if: inputs.command == 'agent-verify'
+      shell: bash
+      env:
+        PC_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        PC_HEAD: ${{ inputs.head || github.event.pull_request.head.sha }}
+        PC_REPO: ${{ inputs.repo-dir }}
+        OUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        set -euo pipefail
+        "$PROOFCHECK_BIN" agent verify --repo "$PC_REPO" --base "$PC_BASE" --head "$PC_HEAD" \
+          --candidates "$OUT_DIR/candidates" --result "$OUT_DIR/result.json" \
+          --json "$OUT_DIR/result.json" --out "$OUT_DIR/card.md"
+        "$PROOFCHECK_BIN" summary --json "$OUT_DIR/result.json" || true

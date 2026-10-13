@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proofcheck"
-version = "0.1.0"
+version = "0.2.0"
 description = "Evidence, not authorship: check whether a pull request actually does what it claims."
 readme = "README.md"
 license = { text = "MIT" }
@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pyyaml>=6"]
 
 [project.scripts]
 proofcheck = "proofcheck.cli:main"

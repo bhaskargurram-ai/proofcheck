@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - Unreleased
+
+### Added
+
+- **Diff evidence map (hunk ablation):** every non-test hunk of the PR is
+  reverted on its own in a temporary head worktree (`git apply -R
+  --unidiff-zero`) and the fail→pass tests and behaviour-changing issue
+  reproducers are re-run. Hunks are *required* (reverting breaks the
+  evidence), *not exercised* (nothing measured depends on them) or *skipped*.
+  New files, deletions and renames are handled; binary, test and
+  documentation files are not ablated. Deterministic order, hunk cap
+  (`ablation.max_hunks`, 12), total time budget (`ablation.time_budget_s`,
+  300 s), per-run timeouts, a clean-worktree baseline run and guaranteed
+  cleanup. New card section, summary line ("3/4 changed hunks are required by
+  the evidence"), an `unexercised` scope note, the `ablation` key in
+  result.json (strictly validated on the comment side), the `[ablation]`
+  config table and `proofcheck run --ablation/--no-ablation`.
+- **Reusable workflows** `evidence.yml`, `agent.yml` and `comment.yml`
+  (`on: workflow_call`), so a repository needs only three short caller
+  workflows. proofcheck is installed from its own repository at
+  `proofcheck-ref`, never from the pull request.
+- **`proofcheck init [--agent] [--force] [--ref]`:** detects the test runner
+  (pytest, jest, unittest) and writes the caller workflows and a commented
+  `proofcheck.toml`; refuses to overwrite existing files.
+- **`proofcheck summary`:** renders the validated card into
+  `$GITHUB_STEP_SUMMARY`, so it is visible on fork PRs without a write token.
+- **Verdict labels:** `proofcheck comment --labels` sets one of
+  `proofcheck: verified | partial | contradicted | no evidence`, creating the
+  label if needed and removing stale ones (idempotent).
+- `proofcheck context --pr N` reads the PR text from the API (for
+  `workflow_run` jobs).
+- Issue reproducers: doctest-style `>>>` sessions (in `pycon`, `doctest`,
+  `python`, `py` or unlabelled fences) are converted into scripts that print
+  each expression like the interactive prompt.
+- `release.yml` (PyPI trusted publishing and a GitHub release from the
+  CHANGELOG) and `pages.yml` (deploys `docs/site/` on public repositories).
+- Workflow security invariants are tested (`tests/test_workflows.py`).
+
+### Changed
+
+- This repository's own `proofcheck.yml`, `proofcheck-comment.yml` and new
+  `proofcheck-agent.yml` call the local reusable workflows; the examples in
+  `examples/workflows/` are the output of `proofcheck init`.
+- `action.yml`: new commands `summary`, `agent-propose`, `agent-verify`; new
+  inputs `ablation`, `labels`, `llm-*`, `repo-dir`; the job summary is
+  rendered from the validated result instead of `card.md`; branding icon.
+- `docs/SECURITY_MODEL.md` describes the three trust zones.
+
 ## [0.1.0] - 2026-10-13
 
 Initial release.
