@@ -4,6 +4,11 @@
 
 It makes no attempt to guess whether a human or an AI wrote the code. It only looks at evidence.
 
+<p align="center">
+  <img src="docs/images/proof-card.png" alt="The proof card proofcheck posted on its own pull request: 'fixes #1' verified by 5 tests that fail on the base commit and pass on the PR head, plus the issue's reproducer; 'backwards compatible' marked as no evidence." width="760">
+  <br><sub>The card proofcheck posted on one of its own pull requests. Running it there also caught a bug in proofcheck itself: quoted example phrases in the description were being counted as claims.</sub>
+</p>
+
 > **Status:** early (0.1.0). Python/pytest support is the most complete. A stdlib `unittest` runner is included, and Jest support is experimental. Feedback and runners for other ecosystems are welcome.
 
 ## What the proof card looks like
