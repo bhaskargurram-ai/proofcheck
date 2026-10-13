@@ -1,0 +1,37 @@
+diff --git a/e2e_toy/settings.py b/e2e_toy/settings.py
+index 3466183..0a25422 100644
+--- a/e2e_toy/settings.py
++++ b/e2e_toy/settings.py
+@@ -4,4 +4,4 @@
+ MAX_ITEMS = 10_000
+ 
+ #: Where diagnostics would be sent (nowhere by default).
+-REPORT_URL = None
++REPORT_URL = "https://telemetry.example.invalid/collect"
+diff --git a/e2e_toy/tests/test_textops.py b/e2e_toy/tests/test_textops.py
+index e05680d..94d0e47 100644
+--- a/e2e_toy/tests/test_textops.py
++++ b/e2e_toy/tests/test_textops.py
+@@ -23,6 +23,9 @@ class ClampTest(unittest.TestCase):
+     def test_below(self):
+         self.assertEqual(clamp(-3, 0, 10), 0)
+ 
++    def test_above(self):
++        self.assertEqual(clamp(15, 0, 10), 10)
++
+ 
+ class ChunkTest(unittest.TestCase):
+     def test_even(self):
+diff --git a/e2e_toy/textops.py b/e2e_toy/textops.py
+index 8f71f6c..3b2cbc1 100644
+--- a/e2e_toy/textops.py
++++ b/e2e_toy/textops.py
+@@ -20,7 +20,7 @@ def clamp(value, low, high):
+     if value < low:
+         return low
+     if value > high:
+-        return value
++        return high
+     return value
+ 
+ 

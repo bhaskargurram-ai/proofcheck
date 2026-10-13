@@ -1,0 +1,21 @@
+description = """A real fix with a fail → pass test, plus an unrelated hunk that turns on a telemetry URL.
+The diff evidence map must show the fix hunk as required and the smuggled hunk as not exercised."""
+title = "Fix clamp so values above the upper bound return the bound"
+body = """
+Fixes #{issue}. Adds a test for values above the upper bound.
+"""
+
+[issue]
+title = "clamp ignores the upper bound (smuggled-hunk scenario)"
+
+[expected]
+verdict = "evidence"
+label = "proofcheck: verified"
+tests_status = "evidence"
+min_fail_to_pass = 1
+ablation_status = "ran"
+min_ablation_required = 1
+min_ablation_not_exercised = 1
+flags = ["unexercised"]
+agent_status = ["none"]
+claims = [{ type = "fixes_issue", status = "verified" }]

@@ -1,0 +1,27 @@
+description = "A genuine bug fix with a regression test and an issue reproducer: everything should be verified."
+title = "Fix word_count with repeated whitespace"
+body = """
+Fixes #{issue}.
+
+`word_count` now splits on any run of whitespace. Adds a regression test.
+"""
+
+[issue]
+title = "word_count counts empty words for repeated spaces"
+
+[expected]
+verdict = "evidence"
+label = "proofcheck: verified"
+tests_status = "evidence"
+min_fail_to_pass = 1
+max_fail_on_head = 0
+repro = ["behavior_changed"]
+min_ablation_required = 1
+max_ablation_not_exercised = 0
+# The agent only runs when a fixes-claim lacks evidence, so it never runs here.
+agent_status = ["none"]
+warnings = false
+claims = [
+  { type = "fixes_issue", status = "verified" },
+  { type = "adds_tests", status = "verified" },
+]
