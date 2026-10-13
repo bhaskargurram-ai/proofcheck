@@ -315,7 +315,14 @@ def init_cmd(repo: str, agent: bool, force: bool, ref: str | None, runner: str |
         res = init_repo(repo, agent=agent, force=force, ref=ref, runner=runner)
     except InitError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"Detected test runner: {res.runner} ({res.reason})")
+    if res.projects:
+        click.echo(f"Detected {len(res.projects)} test projects (written as [[project]] tables):")
+        for p in res.projects:
+            click.echo(f"  {p.name}: {p.path} ({p.runner}; {p.reason})")
+    else:
+        click.echo(f"Detected test runner: {res.runner} ({res.reason})")
+    for path, why in res.skipped:
+        click.echo(f"  skipped {path}: {why}")
     for path in res.written:
         click.echo(f"  wrote {path}")
     click.echo("")

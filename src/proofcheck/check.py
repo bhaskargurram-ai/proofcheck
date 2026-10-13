@@ -12,12 +12,12 @@ from . import git as gitmod
 from .benchmark import BenchmarkResult, run_benchmark
 from .config import Config
 from .evidence import assess_claims, verdict
-from .failtopass import STATUS_SKIPPED, TestCheck, run_fail_to_pass
+from .failtopass import STATUS_SKIPPED, TestCheck
 from .llm import ClaimExtractor, LLMError
-from .proc import run_command, scrub_env
+from .proc import scrub_env
+from .projects import ProjectSet, build_projects, run_projects_fail_to_pass, setup_projects
 from .repro import IssueRepro, reproduce_issue
 from .result import new_result
-from .runners import get_runner
 from .scope import analyze_scope
 
 
@@ -33,14 +33,9 @@ class PRContext:
     number: int | None = None
 
 
-def _setup(cfg: Config, wt: Path, env: Mapping[str, str]) -> str | None:
-    if not cfg.setup_command:
-        return None
-    r = run_command(cfg.setup_command, cwd=wt, env=env, timeout=cfg.timeout)
-    if not r.ok:
-        why = "timed out" if r.timed_out else (r.launch_error or f"exit code {r.returncode}")
-        return f"setup_command failed in {wt.name}: {why}"
-    return None
+def _setup(projects: list, wt: Path, env: Mapping[str, str]) -> str | None:
+    errors = setup_projects(projects, wt, env)
+    return "; ".join(errors) if errors else None
 
 
 def run_check(
@@ -60,7 +55,10 @@ def run_check(
     mb = gitmod.merge_base(repo, base_sha, head_sha)
     notes: list[str] = []
 
-    runner = get_runner(cfg.runner, cfg.test_command, cfg.test_patterns, cfg.test_module_patterns)
+    projects = build_projects(cfg, repo)
+    # A single implicit root project is used directly; several projects are
+    # seen through one runner-like view over repository-relative paths.
+    runner = projects[0].runner if len(projects) == 1 and projects[0].is_root else ProjectSet(projects)
     changed = gitmod.changed_files(repo, mb, head_sha)
 
     claims = C.extract_claims(ctx.title, ctx.body)
@@ -83,7 +81,7 @@ def run_check(
 
     with gitmod.worktree(repo, mb, prefix="proofcheck-base-") as base_wt, gitmod.worktree(repo, head_sha, prefix="proofcheck-head-") as head_wt:
         for wt in (base_wt, head_wt):
-            err = _setup(cfg, wt, env)
+            err = _setup(projects, wt, env)
             if err:
                 notes.append(err)
         if cfg.repro_enabled:
@@ -96,7 +94,8 @@ def run_check(
             tests = TestCheck(status=STATUS_SKIPPED, runner=runner.name)
         else:
             # Runs last: it writes head versions of the test files into base_wt.
-            tests = run_fail_to_pass(runner, repo, mb, head_sha, changed, base_wt, head_wt, env, cfg.timeout, check_old_tests=want_old)
+            tests = run_projects_fail_to_pass(projects, repo, mb, head_sha, changed, base_wt, head_wt, env,
+                                              check_old_tests=want_old, multi=bool(cfg.projects))
 
     # Issues referenced but not available (e.g. cross-repo or fetch failed).
     for num in C.referenced_issue_numbers(claims, ctx.repo):
@@ -110,9 +109,10 @@ def run_check(
 
         ablation = run_ablation(
             repo, mb, head_sha, changed, runner, tests, repros, ctx.issues, env, environ=environ,
-            max_hunks=cfg.ablation.max_hunks, time_budget_s=cfg.ablation.time_budget_s, test_timeout=cfg.timeout,
+            max_hunks=cfg.ablation.max_hunks, time_budget_s=cfg.ablation.time_budget_s,
+            test_timeout=max(p.timeout for p in projects),
             repro_timeout=cfg.repro_timeout, python=cfg.repro_python, exclude=cfg.ablation.exclude,
-            setup=lambda wt: _setup(cfg, wt, env),
+            setup=lambda wt: _setup(projects, wt, env),
         )
         flag = ablation_scope_flag(ablation)
         if flag is not None:
