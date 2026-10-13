@@ -243,6 +243,7 @@ The `bhaskargurram-ai/proofcheck@v0.2.0` composite action is still available for
 | **Diff evidence map** | Which changed hunks the evidence depends on. See [below](#diff-evidence-map). |
 | **Agent evidence** | Only when the agent ran: verdict, model, variants tried, cost, and the winning test. |
 | **Scope** | Changes to CI config, dependency manifests, binaries, very large diffs, and hunks no evidence depends on. |
+| **Data block** | Invisible: a `<!-- proofcheck:data {...} -->` comment at the end with the verdict, claim statuses and counts as JSON, for bots and the end-to-end harness. Read it with `proofcheck.carddata.parse_card_data`. See [docs/TESTING.md](docs/TESTING.md#the-cards-data-block). |
 
 <details>
 <summary><b>Fail-to-pass tests in detail</b></summary>
@@ -649,7 +650,7 @@ pip install -e ".[dev]"
 python -m pytest            # or, without pytest: python -m unittest discover -s tests
 ```
 
-The test suite builds real throwaway git repositories and worktrees, so it needs `git` on `PATH`. Please report security issues privately through the repository's security advisory form rather than in a public issue.
+The test suite builds real throwaway git repositories and worktrees, so it needs `git` on `PATH`. [docs/TESTING.md](docs/TESTING.md) describes every test level, including the packaging check and the end-to-end harness in [`e2e/`](e2e/README.md) that opens real pull requests against a test repository. Please report security issues privately through the repository's security advisory form rather than in a public issue.
 
 ## License
 

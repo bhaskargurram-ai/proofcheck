@@ -368,6 +368,11 @@ def render_card(result: dict[str, Any], trusted_warnings: list[str] | None = Non
         f"proofcheck {escape_md(result.get('tool_version', ''), 20)}</sub>",
     ]
     card = "\n".join(lines) + "\n"
-    if len(card) > MAX_CARD_CHARS:
-        card = card[: MAX_CARD_CHARS - 200] + "\n\n_…card truncated; see result.json for the full report._\n"
-    return card
+    # Machine-readable summary (see carddata.py); always last, never truncated.
+    from .carddata import card_data_block
+
+    data = card_data_block(result, trusted_warnings=len(trusted_warnings or []))
+    limit = MAX_CARD_CHARS - len(data) - 1
+    if len(card) > limit:
+        card = card[: limit - 200] + "\n\n_…card truncated; see result.json for the full report._\n"
+    return card + data + "\n"

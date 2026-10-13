@@ -30,3 +30,79 @@ jobs:
         run: python -m unittest discover -s tests
       - name: Demo (pytest runner)
         run: PROOFCHECK_RUNNER=pytest examples/demo/run_demo.sh "$RUNNER_TEMP/demo"
+
+  # Build the distributions and use them the way a user would: install the
+  # wheel into a fresh virtualenv (outside the checkout) and run the CLI,
+  # `proofcheck init` and the demo against it.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade build twine
+          python -m build --outdir "$RUNNER_TEMP/dist"
+          ls -l "$RUNNER_TEMP/dist"
+      - name: Check distribution metadata
+        run: python -m twine check --strict "$RUNNER_TEMP"/dist/*
+      - name: Check the sdist contents
+        run: |
+          set -euo pipefail
+          tar tzf "$RUNNER_TEMP"/dist/proofcheck-*.tar.gz > "$RUNNER_TEMP/sdist.txt"
+          for f in LICENSE README.md pyproject.toml src/proofcheck/cli.py src/proofcheck/carddata.py \
+                   src/proofcheck/unittest_junit.py src/proofcheck/agent/verify.py; do
+            grep -q "/$f\$" "$RUNNER_TEMP/sdist.txt" || { echo "::error::sdist lacks $f"; exit 1; }
+          done
+      - name: Install the wheel into a fresh virtualenv
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check "$RUNNER_TEMP"/dist/*.whl
+      - name: Smoke-test the installed CLI and `proofcheck init`
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          pc="$RUNNER_TEMP/venv/bin/proofcheck"
+          # The installed copy, not the checkout, must be the one that runs.
+          "$RUNNER_TEMP/venv/bin/python" -c 'import proofcheck, sys; p = proofcheck.__file__; print(p); sys.exit("site-packages" not in p)'
+          "$pc" --help
+          "$pc" --version
+          "$pc" agent --help
+          repo="$RUNNER_TEMP/init-repo"
+          mkdir -p "$repo/tests"
+          git -C "$repo" init -q
+          printf 'def test_ok():\n    assert True\n' > "$repo/tests/test_ok.py"
+          "$pc" init --repo "$repo"
+          for f in .github/workflows/proofcheck.yml .github/workflows/proofcheck-comment.yml proofcheck.toml; do
+            test -s "$repo/$f" || { echo "::error::init did not write $f"; exit 1; }
+          done
+      - name: Run the demo with the installed wheel
+        run: |
+          set -euo pipefail
+          # As in evidence.yml: proofcheck runs from its own virtualenv, the project's
+          # tests (and pytest) from the job's Python.
+          python -m pip install --disable-pip-version-check pytest
+          # A copy outside the checkout, so run_demo.sh's PYTHONPATH=<root>/src points nowhere.
+          mkdir -p "$RUNNER_TEMP/pkgdemo/examples"
+          cp -r examples/demo "$RUNNER_TEMP/pkgdemo/examples/demo"
+          PYTHON="$RUNNER_TEMP/venv/bin/python" PROOFCHECK_RUNNER=pytest \
+            "$RUNNER_TEMP/pkgdemo/examples/demo/run_demo.sh" "$RUNNER_TEMP/demo"
+          "$RUNNER_TEMP/venv/bin/python" - "$RUNNER_TEMP/demo" <<'PY'
+          import json, pathlib, sys
+          from proofcheck.carddata import parse_card_data
+          demo = pathlib.Path(sys.argv[1])
+          real = json.loads((demo / "result-real.json").read_text())["verdict"]
+          fake = json.loads((demo / "result-fake.json").read_text())["verdict"]
+          data = parse_card_data((demo / "card-real.md").read_text())
+          print("real:", real, "fake:", fake, "data block verdict:", data and data["verdict"])
+          # As documented in the README: the real fix is "partial" (its backwards-compatibility
+          # claim cannot be proven), the fake one is contradicted.
+          assert (real, fake) == ("partial", "contradicted"), (real, fake)
+          assert data and data["verdict"] == real and data["tests"]["fail_to_pass"] >= 1, data
+          PY

@@ -1,0 +1,15 @@
+# Added by proofcheck's e2e "workflow-change" scenario. It only runs when
+# started by hand and does nothing; the scenario's PR is closed unmerged.
+name: proofcheck e2e dummy
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "proofcheck e2e dummy workflow"

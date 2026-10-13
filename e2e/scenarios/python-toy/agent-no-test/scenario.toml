@@ -1,0 +1,30 @@
+description = """A real fix without any test. Deterministic checks find no evidence; with the agent workflow
+installed, an LLM-written reproduction test may verify the claim ("verified (agent test)")."""
+title = "Fix chunk dropping the last partial chunk"
+body = """
+Fixes #{issue}.
+"""
+# Opts the PR in to the agent even when the token's account is not an owner/member/collaborator
+# (e.g. a GitHub App token); harmless when the agent workflow is not installed.
+labels = ["proofcheck:agent"]
+
+[issue]
+title = "chunk drops the last partial chunk"
+
+[wait]
+# Keep polling after the first card until the agent section appears (or 20 minutes pass).
+agent = true
+agent_grace = 1200
+
+[expected]
+verdict = ["evidence", "no_evidence"]
+label = ["proofcheck: verified", "proofcheck: no evidence"]
+tests_status = "no_tests"
+max_fail_on_head = 0
+agent_status = ["verified (agent test)", "no evidence", "weak", "inconclusive", "none"]
+claims = [{ type = "fixes_issue", status = ["verified", "unverified"] }]
+
+[expected_local]
+# Offline there is no agent: nothing can verify the claim.
+verdict = "no_evidence"
+claims = [{ type = "fixes_issue", status = "unverified" }]

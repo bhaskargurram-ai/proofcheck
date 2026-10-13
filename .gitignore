@@ -11,3 +11,7 @@ htmlcov/
 proofcheck-out/
 card.md
 result.json
+e2e/report.md
+e2e/report.json
+e2e/report-local.md
+e2e/report-local.json

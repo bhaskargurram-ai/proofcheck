@@ -1,0 +1,15 @@
+description = """Adds a (manual-only, no-op) workflow file. The card must carry the scope flag for workflow
+changes, and the comment workflow must add its trusted warning that the PR could have altered the run
+that produced the card. Pushing this branch needs a token with the `workflow` scope."""
+title = "Add a manual-only dummy workflow (proofcheck e2e)"
+body = """
+Adds a workflow that only runs when started by hand.
+"""
+
+[expected]
+verdict = "no_evidence"
+label = "proofcheck: no evidence"
+claim_count = 0
+flags = ["workflow"]
+warnings = true
+agent_status = ["none"]
