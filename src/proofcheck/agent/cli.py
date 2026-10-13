@@ -14,7 +14,8 @@ import click
 from .. import git as gitmod
 from ..config import Config, ConfigError, load_config_file, load_config_from_ref
 from ..proc import scrub_env
-from ..runners import get_runner
+from ..projects import Project, build_projects
+from ..runners import RUNNER_NAMES
 from . import VARIANTS
 from .config import AgentConfig, AgentConfigError, load_agent_config_file, load_agent_config_from_ref
 from .llm_tools import LLMConfigError, client_from_env
@@ -32,13 +33,14 @@ def _load_configs(repo: str, base: str, config_path: str | None) -> tuple[Config
         raise click.ClickException(f"config error: {exc}") from exc
 
 
-def _runner(cfg: Config, runner: str | None, test_command: str | None):
+def _projects(cfg: Config, repo: str, runner: str | None, test_command: str | None) -> list[Project]:
+    """The configured test projects; ``--runner``/``--test-command`` override the root project's."""
     if runner:
         cfg.runner = runner
     if test_command:
         cfg.test_command = shlex.split(test_command)
     try:
-        return get_runner(cfg.runner, cfg.test_command, cfg.test_patterns, cfg.test_module_patterns)
+        return build_projects(cfg, repo)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -150,7 +152,8 @@ _common = [
     click.option("--head", default="HEAD", show_default=True, help="Head ref (the PR)."),
     click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False),
                  help="Config file. Default: proofcheck.toml / [tool.proofcheck] read from the BASE commit."),
-    click.option("--runner", type=click.Choice(["pytest", "unittest", "jest"]), default=None, help="Override the test runner."),
+    click.option("--runner", type=click.Choice(list(RUNNER_NAMES)), default=None,
+                 help="Override the root project's test runner ([[project]] tables keep theirs)."),
     click.option("--test-command", default=None, help="Override the test command (never run through a shell)."),
 ]
 
@@ -200,7 +203,7 @@ def propose_cmd(repo, base, head, config_path, runner, test_command, context_fil
 
     cfg, acfg = _load_configs(repo, base, config_path)
     _apply_overrides(acfg, variants, max_tool_calls, when)
-    test_runner = _runner(cfg, runner, test_command)
+    projects = _projects(cfg, repo, runner, test_command)
     result = _read_result(result_path)
     if _disabled(acfg, enable):
         b, h = gitmod.resolve_ref(repo, base), gitmod.resolve_ref(repo, head)
@@ -211,9 +214,9 @@ def propose_cmd(repo, base, head, config_path, runner, test_command, context_fil
         return
     pr_title, pr_body, issues = _pr_text(context_file, pr_body_file, title, issue_body_file)
     try:
-        proposal = propose(repo, base, head, agent_cfg=acfg, runner=test_runner, llm_factory=_llm_factory(cfg, acfg),
+        proposal = propose(repo, base, head, agent_cfg=acfg, runner=projects[0].runner, llm_factory=_llm_factory(cfg, acfg),
                            pr_title=pr_title, pr_body=pr_body, issues=issues, result=result, secrets_=_secrets(),
-                           log=lambda s: click.echo(s, err=True))
+                           log=lambda s: click.echo(s, err=True), projects=projects)
     except gitmod.GitError as exc:
         raise click.ClickException(str(exc)) from exc
     path = write_proposal(out_dir, proposal)
@@ -234,18 +237,19 @@ def propose_cmd(repo, base, head, config_path, runner, test_command, context_fil
               help="result.json from `proofcheck run` to merge into (recommended).")
 @click.option("--json", "json_path", type=click.Path(dir_okay=False), default=None, help="Write the merged result.json here.")
 @click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None, help="Write the Markdown card here.")
-@click.option("--timeout", type=click.FloatRange(1, 3600), default=None, help="Per-run test timeout (default: agent.test_timeout).")
+@click.option("--timeout", type=click.FloatRange(1, 3600), default=None,
+              help="Per-candidate, per-commit test timeout (default: agent.test_timeout; 120 s, or the project's timeout for cargo).")
 def verify_cmd(repo, base, head, config_path, runner, test_command, candidates_dir, result_path, json_path, out_path, timeout) -> None:
     """Run the candidates on base and head and merge the outcome into result.json (no LLM)."""
     from .verify import merge_into_result, verify_candidates_dir
 
     cfg, acfg = _load_configs(repo, base, config_path)
-    test_runner = _runner(cfg, runner, test_command)
+    projects = _projects(cfg, repo, runner, test_command)
     result = _read_result(result_path) or _minimal_result(repo, base, head, cfg.source)
     env = scrub_env(None, extra=cfg.test_env)
     try:
-        manifest, section = verify_candidates_dir(repo, base, head, candidates_dir, test_runner, env,
-                                                  timeout or acfg.test_timeout, cfg.setup_command)
+        manifest, section = verify_candidates_dir(repo, base, head, candidates_dir, None, env, timeout,
+                                                  projects=projects, agent_cfg=acfg)
         if result.get("head") != gitmod.resolve_ref(repo, head):
             raise click.ClickException("result.json was produced for a different head commit")
     except gitmod.GitError as exc:
@@ -274,16 +278,16 @@ def run_cmd(repo, base, head, config_path, runner, test_command, context_file, p
         click.echo("WARNING: running inside GitHub Actions. Never use `agent run` on untrusted pull requests.", err=True)
     cfg, acfg = _load_configs(repo, base, config_path)
     _apply_overrides(acfg, variants, max_tool_calls, when, max_rounds)
-    test_runner = _runner(cfg, runner, test_command)
+    projects = _projects(cfg, repo, runner, test_command)
     result = _read_result(result_path)
     if _disabled(acfg, enable):
         return
     pr_title, pr_body, issues = _pr_text(context_file, pr_body_file, title, issue_body_file)
     env = scrub_env(None, extra=cfg.test_env)
     try:
-        run = run_agent(repo, base, head, agent_cfg=acfg, runner=test_runner, llm_factory=_llm_factory(cfg, acfg), env=env,
+        run = run_agent(repo, base, head, agent_cfg=acfg, runner=projects[0].runner, llm_factory=_llm_factory(cfg, acfg), env=env,
                         pr_title=pr_title, pr_body=pr_body, issues=issues, result=result, setup_command=cfg.setup_command,
-                        secrets_=_secrets(), out_dir=out_dir, log=lambda s: click.echo(s, err=True))
+                        secrets_=_secrets(), out_dir=out_dir, log=lambda s: click.echo(s, err=True), projects=projects)
     except gitmod.GitError as exc:
         raise click.ClickException(str(exc)) from exc
     base_result = result or _minimal_result(repo, base, head, cfg.source)

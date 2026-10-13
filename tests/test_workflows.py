@@ -186,6 +186,22 @@ class WorkflowSecurityTest(unittest.TestCase):
         for job_name in ("gate", "propose"):  # never build or run the PR there
             self.assertNotIn("rustup", json.dumps(jobs[job_name]))
             self.assertNotIn("cargo", json.dumps(jobs[job_name]))
+        # Rust candidates compile without a cache: the verify job's timeout is an input (default >= 60 minutes).
+        agent_wf = load(WF_DIR / "agent.yml")
+        self.assertGreaterEqual(agent_wf["on"]["workflow_call"]["inputs"]["timeout-minutes"]["default"], 60)
+        self.assertEqual(jobs["verify"]["timeout-minutes"], "${{ inputs.timeout-minutes }}")
+
+    def test_generated_callers_only_pass_declared_inputs(self):
+        from proofcheck.init_cmd import agent_caller, evidence_caller
+
+        declared = {name: set(load(WF_DIR / name)["on"]["workflow_call"]["inputs"]) for name in ("evidence.yml", "agent.yml")}
+        for runners in (["pytest"], ["unittest"], ["cargo"], ["cargo", "pytest", "jest"]):
+            for name, text in (("evidence.yml", evidence_caller("v1", runners[0], runners=runners)),
+                               ("agent.yml", agent_caller("v1", runners[0], runners=runners))):
+                wf = yaml.safe_load(text)
+                job = next(j for j in wf["jobs"].values() if str(j.get("uses", "")).split("@")[0].endswith(name))
+                with self.subTest(workflow=name, runners=runners):
+                    self.assertLessEqual(set(job["with"]), declared[name])
 
     def test_action_yml_inputs_reach_scripts_via_env_only(self):
         action = load(_helpers.ROOT / "action.yml")

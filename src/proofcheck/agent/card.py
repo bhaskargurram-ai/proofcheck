@@ -68,7 +68,7 @@ def safe_code_block(src: Any, lang: str = "python") -> str:
     if len(s) > MAX_CODE_CHARS:
         s, truncated = s[:MAX_CODE_CHARS], True
     if truncated:
-        s += "\n# … truncated; see result.json"
+        s += ("\n// … truncated; see result.json" if lang == "rust" else "\n# … truncated; see result.json")
     longest = max((len(m) for m in re.findall(r"`+|~+", s)), default=0)
     fence = "`" * max(3, longest + 1)
     return f"{fence}{lang}\n{s}\n{fence}"
@@ -86,7 +86,11 @@ def agent_section(result: dict[str, Any]) -> list[str]:
         return []
     out = ["### 🤖 Agent evidence (experimental)", ""]
     status = a.get("status", STATUS_ERROR)
+    rust = a.get("language") == "rust"
     head = HEADLINES.get(status, HEADLINES[STATUS_ERROR])
+    if rust and status == STATUS_WEAK:
+        head = ("⚠️ **Weak:** an agent-written Rust test fails on base only because it does not compile there "
+                "(it uses an item the PR adds), so it shows the API is new rather than that the bug is fixed.")
     if status in (STATUS_SKIPPED, STATUS_ERROR) and a.get("reason"):
         head += f" {escape_md(a['reason'], 200)}"
     out.append(head)
@@ -121,7 +125,8 @@ def agent_section(result: dict[str, Any]) -> list[str]:
         out += ["", "<details>", f"<summary>{label}: <code>{_defuse(_clean(w.get('file', ''), 120))}</code></summary>", ""]
         if w.get("rationale"):
             out += [f"_Agent's rationale (unverified):_ {escape_md(w['rationale'], 400)}", ""]
-        out += [safe_code_block(w["code"]), "", "</details>"]
+        out += [safe_code_block(w["code"], "rust" if rust or str(w.get("file", "")).endswith(".rs") else "python"),
+                "", "</details>"]
         if w.get("classification") == FAIL_TO_PASS:
             out += ["", "> Commit this test to keep the evidence: it is not part of the PR until someone adds it."]
     notes = (a.get("notes") or [])[:4]

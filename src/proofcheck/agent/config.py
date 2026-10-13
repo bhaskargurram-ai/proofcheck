@@ -25,6 +25,9 @@ else:  # pragma: no cover - exercised only on Python 3.10
 
 WHEN_CHOICES = ("missing-evidence", "always")
 DEFAULT_TEST_DIR = "tests/proofcheck_agent"
+DEFAULT_TEST_TIMEOUT = 120.0
+#: Default per-candidate timeout for cargo projects without a configured timeout.
+CARGO_TEST_TIMEOUT = 1800.0
 
 
 class AgentConfigError(ValueError):
@@ -49,11 +52,22 @@ class AgentConfig:
     temperature: float | None = None  # omitted from requests unless set
     request_timeout: float = 120
     max_retries: int = 4
-    test_timeout: float = 120  # per candidate and commit
+    #: Seconds per candidate and commit. None (the default): 120 for Python projects, and the
+    #: project's own timeout for cargo projects (1800 unless configured), because a Rust candidate
+    #: has to compile the crate first.
+    test_timeout: float | None = None
     source: str = "defaults"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def timeout_for(self, runner_name: str, project_timeout: float | None = None) -> float:
+        """Per-candidate, per-commit test timeout for a project with runner ``runner_name``."""
+        if self.test_timeout is not None:
+            return float(self.test_timeout)
+        if runner_name == "cargo":
+            return float(project_timeout or CARGO_TEST_TIMEOUT)
+        return DEFAULT_TEST_TIMEOUT
 
 
 def _int(value: Any, key: str, lo: int, hi: int) -> int:

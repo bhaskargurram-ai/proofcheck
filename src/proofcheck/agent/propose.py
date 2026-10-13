@@ -22,12 +22,16 @@ from typing import Any, Callable, Mapping, Sequence
 from .. import __version__
 from .. import claims as C
 from .. import git as gitmod
+from ..config import ROOT_PROJECT_NAME
+from ..projects import Project
 from ..runners import TestRunner
 from . import MANIFEST_SCHEMA, MANIFEST_VERSION, STATUS_ERROR, STATUS_SKIPPED, VARIANTS
-from .config import AgentConfig
+from .config import AgentConfig, AgentConfigError, validate_test_dir
 from .llm_tools import LLMConfigError, LLMToolError, Reply, ToolCall, ToolLLM, ToolResult, Turn, Usage
 from .prompts import FORCE_SUBMIT, NUDGE, TaskContext, initial_message, issue_block, rejection_message, system_prompt
+from .ruststatic import RustTarget, validate_rust_test
 from .static import ModuleIndex, StaticReport, validate_test_code
+from .target import RUST, AgentTarget, select_target
 from .tools import SUBMIT_TOOL, RepoTools, list_head_files, read_blob_text, validate_submission
 
 MAX_TRANSCRIPT_FIELD = 2_000
@@ -116,6 +120,8 @@ class VariantSession:
     index: ModuleIndex | None
     max_tool_calls: int
     secrets: Sequence[str] = ()
+    #: Set for Rust candidates: the crate the integration test must use.
+    rust: RustTarget | None = None
     round: int = 0
     tool_calls_used: int = 0
     status: str = NO_SUBMISSION
@@ -154,7 +160,10 @@ class VariantSession:
             self.errors = errors
             self.status = INVALID
             return False, rejection_message(errors)
-        report: StaticReport = validate_test_code(args["code"], self.style, self.index)
+        if self.rust is not None:
+            report: StaticReport = validate_rust_test(args["code"], self.rust)
+        else:
+            report = validate_test_code(args["code"], self.style, self.index)
         if not report.ok:
             self.errors = report.errors
             self.status = INVALID
@@ -169,7 +178,7 @@ class VariantSession:
         self.errors = []
         note = f"Accepted. proofcheck stored the file as {self.test_path} and will run it on base and head."
         if report.repairs:
-            note += " Imports were repaired: " + "; ".join(report.repairs)
+            note += (" Paths were repaired: " if self.rust is not None else " Imports were repaired: ") + "; ".join(report.repairs)
         return True, note
 
     # -- history compaction ----------------------------------------------------------------
@@ -261,21 +270,30 @@ class VariantSession:
 # --------------------------------------------------------------------------- context
 
 
-def detect_style(repo: str | Path, head_sha: str, runner_name: str, paths: Sequence[str] | None = None) -> str:
-    """``unittest`` when the project runs unittest (or shows no sign of pytest), else ``pytest``."""
+def detect_style(repo: str | Path, head_sha: str, runner_name: str, paths: Sequence[str] | None = None,
+                 subdir: str = ".") -> str:
+    """``unittest`` when the project runs unittest (or shows no sign of pytest), else ``pytest``.
+
+    ``paths`` are relative to the project directory ``subdir``.
+    """
     if runner_name == "unittest":
         return "unittest"
-    paths = list(paths if paths is not None else list_head_files(str(repo), head_sha))
+    if runner_name == "cargo":
+        return "rust"
+    prefix = "" if subdir in ("", ".") else subdir.rstrip("/") + "/"
+    if paths is None:
+        paths = [p[len(prefix):] for p in list_head_files(str(repo), head_sha) if p.startswith(prefix)]
+    paths = list(paths)
     names = set(paths)
     if any(p == "conftest.py" or p.endswith("/conftest.py") for p in paths) or "pytest.ini" in names:
         return "pytest"
     for cfg_file, marker in (("pyproject.toml", "[tool.pytest"), ("setup.cfg", "[tool:pytest]"), ("tox.ini", "[pytest]")):
-        if cfg_file in names and marker in (read_blob_text(str(repo), head_sha, cfg_file) or ""):
+        if cfg_file in names and marker in (read_blob_text(str(repo), head_sha, prefix + cfg_file) or ""):
             return "pytest"
     tests = [p for p in paths if re.search(r"(^|/)(test_[^/]*|[^/]*_test)\.py$", p)][:30]
     uses_pytest = uses_unittest = 0
     for p in tests:
-        src = read_blob_text(str(repo), head_sha, p) or ""
+        src = read_blob_text(str(repo), head_sha, prefix + p) or ""
         uses_pytest += bool(re.search(r"^\s*(import pytest|from pytest\b)", src, re.M))
         uses_unittest += bool(re.search(r"^\s*(import unittest|from unittest\b)", src, re.M))
     if uses_unittest and not uses_pytest:
@@ -284,6 +302,8 @@ def detect_style(repo: str | Path, head_sha: str, runner_name: str, paths: Seque
 
 
 def runner_description(runner: TestRunner, style: str) -> str:
+    if runner.name == "cargo":
+        return "cargo test (each file in a crate's tests/ directory is its own test crate)"
     if runner.name == "unittest":
         return "proofcheck's unittest runner (the file is imported as a module and its TestCase classes are run)"
     return "pytest" + (" (unittest.TestCase classes are collected too)" if style == "unittest" else "")
@@ -316,6 +336,8 @@ class Proposal:
     manifest: dict[str, Any]
     sessions: list[VariantSession]
     budget: Budget
+    #: Where the candidates go (None for a skipped run).
+    target: AgentTarget | None = None
 
 
 def _base_manifest(base_sha: str, head_sha: str, merge_base: str, cfg: AgentConfig) -> dict[str, Any]:
@@ -323,6 +345,7 @@ def _base_manifest(base_sha: str, head_sha: str, merge_base: str, cfg: AgentConf
         "schema": MANIFEST_SCHEMA, "version": MANIFEST_VERSION, "tool_version": __version__,
         "status": "proposed", "reason": "", "base": base_sha, "head": head_sha, "merge_base": merge_base,
         "provider": "", "model": "", "style": "", "test_dir": cfg.test_dir, "target_claim": "", "target_issue": None,
+        "language": "", "project": "", "project_path": "", "runner": "", "crate": None, "target_reason": "",
         "variants": [], "candidates": [], "usage": Usage().to_dict(), "cost_usd": None,
         "budgets": {"max_tool_calls": cfg.max_tool_calls, "max_total_tokens": cfg.max_total_tokens,
                     "max_output_tokens": cfg.max_output_tokens, "max_cost_usd": cfg.max_cost_usd},
@@ -344,8 +367,13 @@ def propose(
     variants: Sequence[str] | None = None,
     secrets_: Sequence[str] = (),
     log: Callable[[str], None] = lambda s: None,
+    projects: Sequence[Project] | None = None,
 ) -> Proposal:
     """Run every prompt variant once and return the manifest and live sessions.
+
+    ``projects`` are the configured test projects (:func:`proofcheck.projects.build_projects`);
+    without them ``runner`` is the only, root project. The candidates go into
+    the project (and, for cargo, the crate) whose source the PR mainly changes.
 
     ``llm_factory`` is only called when there is work to do, so a skipped run
     never needs LLM configuration.
@@ -356,28 +384,50 @@ def propose(
     mb = gitmod.merge_base(repo, base_sha, head_sha)
     manifest = _base_manifest(base_sha, head_sha, mb, agent_cfg)
     budget = Budget.from_config(agent_cfg)
+    if not projects:
+        projects = [Project(ROOT_PROJECT_NAME, ".", runner, agent_cfg.timeout_for(runner.name))]
 
     if result is not None:
         claims = list(result.get("claims") or [])
     else:
         claims = [c.to_dict() for c in C.extract_claims(pr_title, pr_body)]
-    target, skip = pick_target(claims, agent_cfg.when, result is not None)
+    target_claim, skip = pick_target(claims, agent_cfg.when, result is not None)
     if skip:
         manifest.update(status=STATUS_SKIPPED, reason=skip)
         return Proposal(manifest, [], budget)
-    tclaim, tissue = target_text(target)
+    tclaim, tissue = target_text(target_claim)
     manifest.update(target_claim=tclaim, target_issue=tissue)
-    if runner.name not in ("pytest", "unittest"):
-        manifest.update(status=STATUS_ERROR, reason=f"the agent only supports Python test runners (pytest, unittest), not {runner.name}")
-        return Proposal(manifest, [], budget)
+
+    paths = list_head_files(str(repo), head_sha)
+    changed_files = gitmod.changed_files(repo, mb, head_sha)
+    target = select_target(str(repo), head_sha, projects, changed_files, agent_cfg.test_dir, paths)
+    manifest.update(target.manifest_fields())
+    error = target.error
+    if not error:
+        try:
+            manifest["test_dir"] = validate_test_dir(target.test_dir)
+        except AgentConfigError as exc:
+            error = f"cannot store candidates in {target.test_dir[:100]!r}: {exc}"
+    if error:
+        manifest.update(status=STATUS_ERROR, reason=error[:500])
+        return Proposal(manifest, [], budget, target)
 
     llm = llm_factory()
     manifest.update(provider=llm.provider, model=llm.model)
-    paths = list_head_files(str(repo), head_sha)
-    style = detect_style(repo, head_sha, runner.name, paths)
+    project = target.project
+    prefix = "" if project.is_root else project.path + "/"
+    local_paths = [p[len(prefix):] for p in paths if p.startswith(prefix)]
+    style = detect_style(repo, head_sha, project.runner.name, local_paths, project.path)
     manifest["style"] = style
-    index = ModuleIndex.from_paths(paths, read=lambda p: read_blob_text(str(repo), head_sha, p))
-    changed = [f.path for f in gitmod.changed_files(repo, mb, head_sha)]
+    index = None
+    rust = None
+    if target.language == RUST:
+        assert target.crate is not None and target.crate.lib is not None
+        rust = RustTarget(target.crate.lib, target.crate.package)
+    else:
+        index = ModuleIndex.from_paths(local_paths, read=lambda p: read_blob_text(str(repo), head_sha, prefix + p))
+    changed = [f.path for f in changed_files]
+    workdir = "the repository root" if project.is_root else project.path
 
     chosen_issues = dict(issues or {})
     if tissue is not None and f"#{tissue}" in chosen_issues:
@@ -389,16 +439,32 @@ def propose(
     for variant in names:
         if variant not in VARIANTS:
             raise ValueError(f"unknown variant {variant!r}")
-        test_path = f"{agent_cfg.test_dir}/{variant_filename(variant)}"
+        test_path = target.candidate_path(variant)
+        run_command = ""
+        if rust is not None and target.crate is not None:
+            stem = test_path.rsplit("/", 1)[-1][:-3]
+            run_command = f"cargo test -p {target.crate.package} --test {stem}"
         ctx = TaskContext(base_sha=mb, head_sha=head_sha, test_path=test_path, style=style,
-                          runner_desc=runner_description(runner, style), target_claim=tclaim, pr_title=pr_title,
-                          pr_body=pr_body, issues=chosen_issues, changed_files=changed)
+                          runner_desc=runner_description(project.runner, style), target_claim=tclaim, pr_title=pr_title,
+                          pr_body=pr_body, issues=chosen_issues, changed_files=changed,
+                          language=target.language or "python",
+                          workdir=workdir,
+                          crate_lib=rust.lib if rust else "", crate_package=rust.package if rust else "",
+                          run_command=run_command)
+        if rust is not None:
+            info = (f"Tests run with {ctx.runner_desc}. Your file is an integration test of `{rust.package}` "
+                    f"(public API only, `use {rust.lib}::...`); inline #[cfg(test)] modules in src/ are not reachable "
+                    "from it. Call list_crates for the crate names.")
+        else:
+            info = f"Tests run with {ctx.runner_desc}. Test style for your file: {style}."
+            if not project.is_root:
+                info += f" Project directory (tests run there): {project.path}"
         tools = RepoTools(str(repo), mb, head_sha, nonce, issue_text=issue_block(ctx, nonce),
-                          is_test_module=runner.is_test_module,
-                          test_info=f"Tests run with {ctx.runner_desc}. Test style for your file: {style}.")
+                          is_test_module=_project_test_module(project), test_info=info,
+                          crates_text=target.crates_text())
         session = VariantSession(variant, llm, tools, system_prompt(ctx, nonce, agent_cfg.max_tool_calls),
                                  [Turn("user", text=initial_message(variant, ctx, nonce))], test_path, style, index,
-                                 agent_cfg.max_tool_calls, secrets=secrets_)
+                                 agent_cfg.max_tool_calls, secrets=secrets_, rust=rust)
         sessions.append(session)
         log(f"agent: variant {variant} ...")
         try:
@@ -410,7 +476,16 @@ def propose(
             session.error = redact(str(exc), secrets_)
         log(f"agent: variant {variant}: {session.status}" + (f" ({session.error})" if session.error else ""))
     update_manifest(manifest, sessions, budget)
-    return Proposal(manifest, sessions, budget)
+    return Proposal(manifest, sessions, budget, target)
+
+
+def _project_test_module(project: Project) -> Callable[[str], bool]:
+    """Repository path -> is it a runnable test module of ``project``?"""
+    def check(path: str) -> bool:
+        if not project.contains(path) or path == project.path:
+            return False
+        return project.runner.is_test_module(project.local(path))
+    return check
 
 
 def update_manifest(manifest: dict[str, Any], sessions: Sequence[VariantSession], budget: Budget) -> None:

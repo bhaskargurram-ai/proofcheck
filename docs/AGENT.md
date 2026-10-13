@@ -12,8 +12,10 @@ for the issue. proofcheck then runs that test itself on the base commit and on
 the PR head. The model never decides anything: only the executed outcome
 counts.
 
-> **Status: experimental.** Off by default. Python projects only (pytest or
-> unittest). The success rate on real projects has **not been measured** yet.
+> **Status: experimental.** Off by default. Python projects (pytest or
+> unittest) and, since v1, Rust crates (cargo; **integration tests through the
+> public API only**, see [Rust](#rust-cargo-projects)). The success rate on real
+> projects has **not been measured** yet.
 
 ## Honest expectations
 
@@ -81,7 +83,8 @@ evidence can upgrade a claim but can never produce ❌.
 | `grep(ref, pattern, path_glob, ignore_case)` | `git grep -E` | ≤ 80 matches shown |
 | `get_diff(path?)` | `git diff` merge-base..head | file list with line counts, then the (truncated) diff |
 | `get_issue()` | — | PR title/body and issue text, as untrusted data |
-| `list_tests()` | `git ls-tree` + runner patterns | existing test modules and how tests run |
+| `list_tests()` | `git ls-tree` + runner patterns | existing test modules of the target project and how tests run |
+| `list_crates()` | `git ls-tree` + `Cargo.toml` at head | cargo projects only: each crate's directory, package and library name, and where the candidate goes |
 | `submit_test(filename, code, rationale, targets_claim)` | — | the only output channel; strict schema |
 
 Paths chosen by the model are validated: relative, no `..` or empty
@@ -110,7 +113,88 @@ The test style follows the project: if it runs tests with the stdlib
 configuration, existing tests import `unittest`), the model must write a
 `unittest.TestCase`; otherwise plain pytest functions are expected.
 Candidates are stored as `tests/proofcheck_agent/test_<variant>.py`
-(configurable with `test_dir`), whatever file name the model suggests.
+(configurable with `test_dir`, relative to the project directory), whatever
+file name the model suggests.
+
+### Which project, which crate
+
+In a repository with several test projects (`[[project]]` tables, see the
+README), the candidates go into the project whose source the PR mainly
+changes: the project with the most changed lines in source files of its own
+language (`.py` for pytest/unittest, `.rs` for cargo; test files excluded).
+If no such file changed, the most changed non-test lines decide; without any,
+the root project is used. The choice and its reason are recorded in the
+manifest (`project`, `target_reason`).
+
+* **Python project** in a subdirectory: the file is
+  `<project>/<test_dir>/test_<variant>.py`; imports are checked against that
+  project's modules (`<project>/src` layout included), the test style is
+  detected from that project, and the test runs with that project's runner
+  and environment, in the project directory, as the project's own tests do.
+* **cargo project**: see below.
+
+`verify` does not trust the manifest's choice blindly: the project it names
+must exist in the verify side's configuration (read from the base commit),
+use a runner of the same language, and contain the candidate directory; for
+Rust the directory must be `<crate>/tests` of a crate that has a library
+target at head.
+
+### Rust (cargo projects)
+
+The candidate is an **integration test**,
+`<crate>/tests/proofcheck_agent_<variant>.rs`, in the crate that holds most of
+the PR's changed non-test `.rs` lines. It runs with
+`cargo test -p <package> --test proofcheck_agent_<variant>` on base and on
+head, through the same cargo runner (and shared `CARGO_TARGET_DIR`) as the
+PR's own Rust tests.
+
+An integration test is a separate crate that links the library, so the model
+is told, in every variant, to:
+
+* reach the code only through the crate's **public API**
+  (`use <library name>::...`; the library name comes from `Cargo.toml`, with
+  `-` turned into `_` or `[lib] name`), preferably through the public function
+  the diff changes or the public API that reaches it;
+* use only items that exist on both commits (a test that does not compile on
+  base is weak evidence), and only the standard library and the crate's
+  existing dependencies;
+* stay deterministic: no network, no processes, no `unsafe`, no environment
+  variables, files only in a temporary directory.
+
+Static checks before a Rust submission is accepted (on the token stream of
+proofcheck's Rust lexer, so strings and comments never trigger them):
+
+* the file tokenizes and its brackets balance;
+* at least one `#[test]` (or `#[tokio::test]`-style) function;
+* it references the crate (`use <lib>` or a `<lib>::` path);
+* a denylist: `std::process` and `Command::new` (unless `Command` is imported
+  from the crate under test), `std::net` and `TcpStream`/`TcpListener`/
+  `UdpSocket`/Unix sockets, `unsafe`, `extern "ABI"` (FFI), `include!`,
+  `include_str!`, `include_bytes!`, `asm!`, `env!`/`option_env!` (except
+  `CARGO_MANIFEST_DIR`, `CARGO_PKG_*`, `CARGO_CRATE_NAME`) and
+  `std::env::var`/`var_os`/`vars`. Like the Python denylist this is a lint,
+  **not a sandbox**.
+
+Repairs, recorded in the manifest: `crate::` paths become `<lib>::` (in an
+integration test `crate` is the test itself) unless they name an item the
+file defines; a top-level `use super::` becomes `use <lib>::`; the package
+name written with hyphens (`use my-crate::x`), or with underscores when
+`[lib] name` differs, becomes the library name. `verify` runs the same checks
+again before it compiles anything, and rejects a candidate file that fails
+them or would need a repair.
+
+`verify` writes all Rust candidates first, then runs them all on head and
+then all on base, so the shared target directory switches worktrees once
+(each switch rebuilds the workspace's own crates; dependencies stay
+compiled).
+
+Classification for Rust: any runtime failure on base (a failed assertion or
+a panic, in the test or in the crate) is behavioural, so **strong**; a
+candidate that **does not compile on base** (it uses an item, field or
+argument the PR adds) is **weak**, the same treatment as a Python
+`ImportError`, and the card says "fails on base only because it does not
+compile there". A candidate that does not compile on head is `fails_on_head`
+(inconclusive).
 
 ### Static checks and import repair
 
@@ -134,14 +218,15 @@ Before a submission is accepted (nothing is executed):
 | Class | Meaning | Effect |
 |---|---|---|
 | `fail_to_pass` | Passes on head; fails on base with a behavioural failure (an assertion, or an exception raised by the project's code) | **Strong.** Upgrades the matching `fixes #N` claim to ✅ verified (agent test). |
-| `fail_to_pass_weak` | Passes on head; fails on base only because a name is missing there (`ImportError`, `ModuleNotFoundError`, or `AttributeError`/`NameError`/argument `TypeError` raised in the test itself) | Weak. Shown on the card, claim stays ⚠️. Shows the API is new, not that a bug is fixed. |
+| `fail_to_pass_weak` | Passes on head; fails on base only because a name is missing there (`ImportError`, `ModuleNotFoundError`, or `AttributeError`/`NameError`/argument `TypeError` raised in the test itself; for Rust: the test does not compile on base) | Weak. Shown on the card, claim stays ⚠️. Shows the API is new, not that a bug is fixed. |
 | `pass_to_pass` | Passes on both | No evidence. |
 | `fails_on_head` | Some test fails on head | **Inconclusive.** Agent tests can be wrong; never a contradiction. |
 | `error` | The runner produced no usable report | No evidence. |
 
 Failures are told apart by reading the JUnit failure message, type and
 traceback: pytest's `assert` messages, `E   ImportError: ...` lines in
-collection errors, and the file the exception was raised in.
+collection errors, and the file the exception was raised in. For Rust, the
+cargo runner reports a target that does not compile as one build error.
 
 ## Safety model
 
@@ -235,10 +320,25 @@ proofcheck agent needed --json result.json --github-output
 
 `candidates/` contains `manifest.json` (schema `proofcheck/agent-candidates`
 v1), the accepted test files under their repository-relative paths (for
-example `candidates/tests/proofcheck_agent/test_reproduce_issue.py`) and
-`transcript.jsonl`. `verify` checks that the manifest was produced for the
-same base and head commits, re-validates every path, and refuses files
-outside `test_dir`.
+example `candidates/tests/proofcheck_agent/test_reproduce_issue.py`, or
+`candidates/crates/foo/tests/proofcheck_agent_reproduce_issue.rs`) and
+`transcript.jsonl`. The manifest also names the `language`, `project`,
+`runner` and, for Rust, the `crate` (directory, package, library name); these
+fields are additive, and manifests without them mean "Python, root project".
+`verify` checks that the manifest was produced for the same base and head
+commits, re-validates the project and directory against its own
+configuration (see [Which project, which crate](#which-project-which-crate)),
+re-validates every path, and refuses files outside the candidate directory.
+
+`--runner` (on `propose`, `verify` and `run`) accepts `pytest`, `unittest`,
+`jest` and `cargo` and overrides the root project's runner; `[[project]]`
+tables keep theirs.
+
+In the reusable `agent.yml` workflow the verify job builds and runs the
+candidates without any cache (it runs PR code), which is slow for Rust: its
+limit is the `timeout-minutes` input (default 60). For a Rust-only
+repository pass an empty `install-command` (`proofcheck init --agent` does
+this, and sets `timeout-minutes: 90`).
 
 `propose` exits 0 and writes a manifest with `"status": "skipped"` when the
 agent is disabled in the base commit's config or no `fixes` claim needs
@@ -275,7 +375,7 @@ variants = 3               # 1-4, or a list: ["reproduce-issue", "exercise-diff"
 max_rounds = 2             # refinement rounds for `proofcheck agent run` (0-5)
 max_tool_calls = 25        # per variant and round (1-100)
 when = "missing-evidence"  # or "always"
-test_dir = "tests/proofcheck_agent"
+test_dir = "tests/proofcheck_agent"   # Python candidates, relative to the project directory
 max_output_tokens = 4096
 max_total_tokens = 1500000
 max_cost_usd = 0           # 0 = no cost cap; only enforced when prices are set
@@ -284,7 +384,7 @@ max_cost_usd = 0           # 0 = no cost cap; only enforced when prices are set
 # temperature = 0.2        # omitted from requests unless set
 request_timeout = 120      # seconds per LLM request
 max_retries = 4            # retries for HTTP 408/409/425/429/500/502/503/504/529 and network errors, with backoff and Retry-After
-test_timeout = 120         # seconds per candidate run on each commit
+# test_timeout = 120       # seconds per candidate run on each commit (default: 120; cargo: the project's timeout, 1800)
 
 [llm]                      # optional fallbacks; environment variables win
 provider = "anthropic"
@@ -298,8 +398,25 @@ Environment variables: `PROOFCHECK_LLM_PROVIDER` (`anthropic` or `openai`),
 
 ## Limitations
 
-* **Python only** (pytest or unittest runners). Jest projects get an `error`
-  status.
+* **Python and Rust only.** Python with pytest or unittest; Rust with cargo.
+  Jest projects get an `error` status.
+* **Rust: integration tests only, public API only.** The candidate is a
+  separate test crate, so private functions, private modules and items
+  behind `#[cfg(test)]` are out of reach, and a bug that cannot be triggered
+  through the public API cannot be reproduced. Writing inline
+  `#[cfg(test)] mod tests` candidates (which the cargo runner could
+  transplant) is not supported yet. A crate without a library target
+  (binary only) or with `autotests = false` gets an `error` status. The test
+  can only use the standard library and the crate's existing dependencies
+  (`#[tokio::test]` needs tokio in `[dev-dependencies]`); the static checks
+  cannot see that, so such a test fails to compile and is reported as
+  inconclusive.
+* **Rust is slow to verify.** Each candidate is compiled for both commits,
+  and the verify job has no cache. The first build of a large workspace can
+  take most of the job's time budget.
+* **One project per run.** The candidates go into one project (and, for Rust,
+  one crate), chosen by changed lines; a PR that fixes the bug in a different
+  project than the one it mostly changes will be targeted wrongly.
 * **One claim per run**: the first `fixes #N` claim that lacks evidence.
 * **The model can read the fix.** A test that fails on base and passes on head
   proves that the PR changed this behaviour, in the direction the test

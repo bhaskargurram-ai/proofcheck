@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Agent: projects and Rust.** The agent writes its candidates in the
+  project whose source the PR mainly changes (`[[project]]` tables), with that
+  project's runner, module index, test style and working directory. For cargo
+  projects it writes an integration test
+  `<crate>/tests/proofcheck_agent_<variant>.rs` in the crate with the most
+  changed `.rs` lines, with Rust prompts (public API only, `use <lib>::...`), a
+  read-only `list_crates` tool, Rust static checks (balanced brackets, a
+  `#[test]` fn, a reference to the crate, a denylist for processes, network,
+  `unsafe`/FFI, `include!`/`env!` and `env::var`) and repairs (`use crate::`,
+  top-level `use super::`, hyphenated package names). `verify` re-validates the
+  manifest's project and directory against its own configuration, re-runs the
+  Rust checks, and classifies a candidate that only fails to compile on base
+  as weak. `--runner` accepts `cargo`; the manifest and the result's `agent`
+  section gain additive `language`/`project` fields. The per-candidate
+  timeout defaults to the project's timeout for cargo (1800 s). The reusable
+  `agent.yml` workflow gains a `timeout-minutes` input for the verify job
+  (default 60, was a fixed 30).
+
 ## [0.2.0] - Unreleased
 
 ### Added
