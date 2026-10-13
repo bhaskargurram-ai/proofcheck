@@ -125,6 +125,18 @@ class EnvScrubTest(unittest.TestCase):
         clean = scrub_env(env, extra={"PYTHONPATH": "/x"})
         self.assertEqual(clean, {"PATH": "/bin", "HOME": "/h", "PYTHONPATH": "/x"})
 
+    def test_git_config_env_is_dropped_as_a_set(self):
+        # Keeping GIT_CONFIG_COUNT while dropping GIT_CONFIG_KEY_n (it contains
+        # "KEY") made every git command inside the tests fail.
+        env = {"PATH": os.environ.get("PATH", "/bin"), "GIT_CONFIG_COUNT": "2",
+               "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "git@github.com:",
+               "GIT_CONFIG_KEY_1": "http.extraheader", "GIT_CONFIG_VALUE_1": "AUTHORIZATION: basic c2VjcmV0",
+               "GIT_EDITOR": "true"}
+        clean = scrub_env(env)
+        self.assertEqual(clean, {"PATH": env["PATH"], "GIT_EDITOR": "true"})
+        r = run_command(["git", "config", "--list"], cwd=_helpers.ROOT, env=clean)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_snippet_cannot_see_secrets(self):
         with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "ghs_supersecret", "PROOFCHECK_LLM_API_KEY": "sk-x"}):
             r = run_snippet("import os\nprint(sorted(k for k in os.environ if 'TOKEN' in k or 'KEY' in k))",

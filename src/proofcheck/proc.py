@@ -44,6 +44,10 @@ def is_sensitive_env_name(name: str) -> bool:
     return any(marker in upper for marker in SENSITIVE_MARKERS)
 
 
+def _is_git_config_env(name: str) -> bool:
+    return name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS") or name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+
+
 def scrub_env(environ: Mapping[str, str] | None = None, extra: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return a copy of ``environ`` without secret-looking variables.
 
@@ -53,6 +57,12 @@ def scrub_env(environ: Mapping[str, str] | None = None, extra: Mapping[str, str]
     """
     source = os.environ if environ is None else environ
     clean = {k: v for k, v in source.items() if not is_sensitive_env_name(k)}
+    # GIT_CONFIG_COUNT/KEY_n/VALUE_n only work as a set: dropping GIT_CONFIG_KEY_n
+    # (it contains "KEY") while keeping the count makes every git command in the
+    # tests fail with "missing config key". The values can carry credentials
+    # (e.g. http.extraheader), so drop the whole family together.
+    if any(_is_git_config_env(k) for k in source):
+        clean = {k: v for k, v in clean.items() if not _is_git_config_env(k)}
     if extra:
         clean.update(extra)
     return clean
