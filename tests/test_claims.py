@@ -41,6 +41,11 @@ class IssueReferenceTest(unittest.TestCase):
         nums = [c.details["number"] for c in C.extract_claims("", "Fixes #5. It does not fix #6.")]
         self.assertEqual(nums, [5])
 
+    def test_quoted_mentions_are_not_claims(self):
+        body = 'The parser now recognises "15.5 s → 0.28 s" and “fixes #7” as phrases. It is 2x faster.'
+        cs = C.extract_claims("", body)
+        self.assertEqual([c.text for c in cs], ["2x faster"])
+
     def test_code_blocks_comments_and_quotes_are_ignored(self):
         body = "Some change.\n\n```\nfixes #1\n```\n<!-- closes #2 -->\n> resolves #3\nUse `fixes #4` syntax."
         self.assertEqual(types(body), [])

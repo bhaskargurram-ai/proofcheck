@@ -69,6 +69,8 @@ class Claim:
 _FENCE_RE = re.compile(r"(^|\n)(```|~~~)[^\n]*\n.*?(\n\2[^\n]*(?=\n|$)|$)", re.S)
 _HTML_COMMENT_RE = re.compile(r"<!--.*?(-->|$)", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+# Short double-quoted spans are mentions ('recognises "3x faster"'), not claims.
+_QUOTED_SPAN_RE = re.compile(r"\"[^\"\n]{1,120}\"|“[^”\n]{1,120}”")
 _QUOTE_LINE_RE = re.compile(r"^\s*>.*$", re.M)
 
 
@@ -109,8 +111,8 @@ def split_sentences(text: str) -> list[str]:
 
 
 def prose_of(sentence: str) -> str:
-    """The sentence with inline code spans blanked out (used for matching)."""
-    return _INLINE_CODE_RE.sub(" ", sentence)
+    """The sentence with inline code and quoted spans blanked out (used for matching)."""
+    return _QUOTED_SPAN_RE.sub(" ", _INLINE_CODE_RE.sub(" ", sentence))
 
 
 def display_of(sentence: str) -> str:
