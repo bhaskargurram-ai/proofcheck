@@ -8,6 +8,7 @@ command with ``true``).
 
 from __future__ import annotations
 
+import re
 import shlex
 import sys
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -80,6 +81,33 @@ class AblationConfig:
     exclude: list[str] = field(default_factory=lambda: list(DEFAULT_ABLATION_EXCLUDE))
 
 
+#: Keys of a ``[[project]]`` table.
+PROJECT_KEYS = frozenset({
+    "name", "path", "runner", "test_command", "setup_command", "test_paths", "test_patterns", "test_module_patterns",
+    "timeout", "test_env", "cargo_target_dir",
+})
+#: Top-level keys that describe the implicit root project (conflict with a [[project]] whose path is ".").
+ROOT_PROJECT_KEYS = ("runner", "test_command", "setup_command", "test_patterns", "test_module_patterns")
+_PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
+ROOT_PROJECT_NAME = "root"
+
+
+@dataclass
+class ProjectConfig:
+    """One ``[[project]]`` table: a test project in a subdirectory (or ``path = "."``)."""
+
+    name: str
+    path: str  # POSIX, relative to the repository root; "." for the root
+    runner: str = "pytest"
+    test_command: list[str] | None = None
+    setup_command: list[str] | None = None
+    test_patterns: list[str] | None = None  # from `test_paths` (or `test_patterns`), relative to the project
+    test_module_patterns: list[str] | None = None
+    timeout: float | None = None  # None: the top-level timeout (cargo: 1800 unless `timeout` is set at the top level)
+    test_env: dict[str, str] = field(default_factory=dict)
+    cargo_target_dir: str | None = None
+
+
 @dataclass
 class Config:
     """Effective proofcheck configuration."""
@@ -102,11 +130,19 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     ablation: AblationConfig = field(default_factory=AblationConfig)
     source: str = "defaults"
+    #: ``[[project]]`` tables (empty: the top-level keys describe the only project, at the root).
+    projects: list[ProjectConfig] = field(default_factory=list)
+    #: Shared CARGO_TARGET_DIR for cargo projects (None: $CARGO_TARGET_DIR, else <tmp>/proofcheck-cargo-target).
+    cargo_target_dir: str | None = None
+    #: True when ``timeout`` was set in the configuration (cargo projects otherwise default to 1800 s).
+    timeout_explicit: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for f in fields(self):
             v = getattr(self, f.name)
+            if isinstance(v, list) and v and is_dataclass(v[0]):
+                v = [x.__dict__.copy() for x in v]
             out[f.name] = v.__dict__.copy() if is_dataclass(v) else v
         return out
 
@@ -117,6 +153,7 @@ _SIMPLE_KEYS = {
     "max_issues", "repro", "llm",
 }
 _SIMPLE_KEYS |= {"ablation", "agent"}  # [agent] is validated by proofcheck.agent.config
+_SIMPLE_KEYS |= {"project", "cargo_target_dir"}  # [[project]] tables (multi-project repositories)
 
 
 def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
@@ -147,6 +184,9 @@ def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
         cfg.test_module_patterns = _as_str_list(data["test_module_patterns"], "test_module_patterns")
     if "timeout" in data:
         cfg.timeout = _as_number(data["timeout"], "timeout", 1)
+        cfg.timeout_explicit = True
+    if "cargo_target_dir" in data:
+        cfg.cargo_target_dir = _as_nonempty_str(data["cargo_target_dir"], "cargo_target_dir")
     if "benchmark_runs" in data:
         cfg.benchmark_runs = int(_as_number(data["benchmark_runs"], "benchmark_runs", 1))
     if "benchmark_timeout" in data:
@@ -181,7 +221,92 @@ def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
     if "api_key" in llm:
         raise ConfigError("never put API keys in proofcheck.toml; use the PROOFCHECK_LLM_API_KEY environment variable")
     _parse_ablation(data.get("ablation", {}), cfg.ablation)
+    if "project" in data:
+        cfg.projects = _parse_projects(data["project"])
+        if any(p.path == "." for p in cfg.projects):
+            clash = [k for k in ROOT_PROJECT_KEYS if k in data]
+            if clash:
+                raise ConfigError(f"a [[project]] has path \".\", so the top-level key(s) {', '.join(clash)} "
+                                  "would describe the same project: move them into that [[project]] table")
     return cfg
+
+
+def _as_nonempty_str(value: Any, key: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{key} must be a non-empty string")
+    return value
+
+
+def normalize_project_path(value: Any, key: str = "project.path") -> str:
+    """Validate a project directory: relative POSIX path inside the repository, no ``..``."""
+    if not isinstance(value, str):
+        raise ConfigError(f"{key} must be a string")
+    p = value.strip()
+    if "\\" in p or p.startswith("/") or re.match(r"^[A-Za-z]:", p) or "\x00" in p:
+        raise ConfigError(f"{key} must be a relative POSIX path inside the repository (got {value!r})")
+    while p.startswith("./"):
+        p = p[2:]
+    p = p.rstrip("/")
+    if p in ("", "."):
+        return "."
+    parts = p.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise ConfigError(f"{key} must not contain '..', '.' or empty components (got {value!r})")
+    return p
+
+
+def _parse_projects(tables: Any) -> list[ProjectConfig]:
+    from .runners import RUNNER_NAMES
+
+    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
+        raise ConfigError("project must be an array of tables ([[project]])")
+    if len(tables) > 20:
+        raise ConfigError("at most 20 [[project]] tables are supported")
+    out: list[ProjectConfig] = []
+    for i, t in enumerate(tables):
+        where = f"project[{i}]"
+        unknown = set(t) - PROJECT_KEYS
+        if unknown:
+            raise ConfigError(f"unknown {where} key(s): {', '.join(sorted(unknown))}")
+        name = t.get("name")
+        if not isinstance(name, str) or not _PROJECT_NAME_RE.match(name):
+            raise ConfigError(f"{where}.name must match {_PROJECT_NAME_RE.pattern} (letters, digits, '_', '.', '-')")
+        if "path" not in t:
+            raise ConfigError(f"{where}.path is required")
+        pc = ProjectConfig(name=name, path=normalize_project_path(t["path"], f"{where}.path"))
+        runner = t.get("runner", "pytest")
+        if runner not in RUNNER_NAMES:
+            raise ConfigError(f"{where}.runner must be one of {', '.join(RUNNER_NAMES)}")
+        pc.runner = runner
+        pc.test_command = _as_command(t.get("test_command"), f"{where}.test_command")
+        pc.setup_command = _as_command(t.get("setup_command"), f"{where}.setup_command")
+        if "test_paths" in t and "test_patterns" in t:
+            raise ConfigError(f"{where}: use test_paths or test_patterns, not both")
+        for key in ("test_paths", "test_patterns"):
+            if key in t:
+                pc.test_patterns = _as_str_list(t[key], f"{where}.{key}")
+        if "test_module_patterns" in t:
+            pc.test_module_patterns = _as_str_list(t["test_module_patterns"], f"{where}.test_module_patterns")
+        if "timeout" in t:
+            pc.timeout = _as_number(t["timeout"], f"{where}.timeout", 1)
+        if "test_env" in t:
+            env = t["test_env"]
+            if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+                raise ConfigError(f"{where}.test_env must be a table of string values")
+            pc.test_env = dict(env)
+        if "cargo_target_dir" in t:
+            pc.cargo_target_dir = _as_nonempty_str(t["cargo_target_dir"], f"{where}.cargo_target_dir")
+        out.append(pc)
+    for attr in ("name", "path"):
+        seen: set[str] = set()
+        for pc in out:
+            v = getattr(pc, attr)
+            if v in seen:
+                raise ConfigError(f"two [[project]] tables have the same {attr} {v!r}")
+            seen.add(v)
+    if any(pc.name == ROOT_PROJECT_NAME and pc.path != "." for pc in out) and not any(pc.path == "." for pc in out):
+        raise ConfigError(f"project name {ROOT_PROJECT_NAME!r} is reserved for the repository root (path \".\")")
+    return out
 
 
 def _parse_ablation(section: Any, out: AblationConfig) -> None:

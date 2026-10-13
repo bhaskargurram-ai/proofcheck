@@ -29,6 +29,9 @@ FLAG_KINDS = ("workflow", "dependency", "binary", "large_diff", "unmentioned", "
 ABLATION_STATUSES = ("ran", "not_applicable", "no_hunks", "baseline_failed", "error")
 HUNK_STATUSES = ("required", "not_exercised", "skipped")
 HUNK_KINDS = ("modify", "add", "delete", "rename")
+BASE_FAILURE_KINDS = ("build",)
+RUNNER_NAMES = ("pytest", "unittest", "jest", "cargo")
+_PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
 
 MAX_STR = 2000
 MAX_ITEMS = 200
@@ -154,7 +157,7 @@ def _agent(v: Any, path: str) -> dict[str, Any] | None:
 
 def _test(v: Any, path: str) -> dict[str, Any]:
     d = _dict(v, path)
-    return {
+    out = {
         "test_id": _str(d.get("test_id"), f"{path}.test_id", 500),
         "file": _str(d.get("file", ""), f"{path}.file", 500),
         "classification": _enum(d.get("classification"), TEST_CLASSES, f"{path}.classification"),
@@ -162,6 +165,27 @@ def _test(v: Any, path: str) -> dict[str, Any]:
         "head": _str(d.get("head", ""), f"{path}.head", 20),
         "touched": _bool(d.get("touched", True), f"{path}.touched"),
         "message": _str(d.get("message", ""), f"{path}.message", 500),
+    }
+    if d.get("base_failure_kind"):  # optional (v1.0): why a fail->pass test failed on base
+        out["base_failure_kind"] = _enum(d["base_failure_kind"], BASE_FAILURE_KINDS, f"{path}.base_failure_kind")
+    return out
+
+
+def _project(v: Any, path: str) -> dict[str, Any]:
+    """One entry of the optional ``tests.projects`` list (multi-project repositories)."""
+    d = _dict(v, path)
+    name = _str(d.get("name"), f"{path}.name", 40)
+    if not _PROJECT_NAME_RE.match(name or ""):
+        raise _err(f"{path}.name", "invalid project name")
+    counts_in = _dict(d.get("counts", {}), f"{path}.counts") or {}
+    return {
+        "name": name,
+        "path": _str(d.get("path", "."), f"{path}.path", 300),
+        "runner": _enum(d.get("runner"), RUNNER_NAMES, f"{path}.runner"),
+        "status": _enum(d.get("status"), TEST_STATUSES, f"{path}.status"),
+        "counts": {k: _int(counts_in.get(k, 0), f"{path}.counts.{k}", minimum=0) for k in TEST_CLASSES},
+        "base_run": _run(d.get("base_run"), f"{path}.base_run"),
+        "head_run": _run(d.get("head_run"), f"{path}.head_run"),
     }
 
 
@@ -195,7 +219,7 @@ def _tests(v: Any, path: str) -> dict[str, Any] | None:
             "failing": _list(old.get("failing"), f"{path}.old_tests_on_head.failing", lambda x, p: _str(x, p, 500), 50),
             "error": _str(old.get("error"), f"{path}.old_tests_on_head.error", optional=True),
         }
-    return {
+    out = {
         "status": _enum(d.get("status"), TEST_STATUSES, f"{path}.status"),
         "runner": _str(d.get("runner", ""), f"{path}.runner", 40),
         "test_files": _list(d.get("test_files"), f"{path}.test_files", lambda x, p: _str(x, p, 500)),
@@ -207,6 +231,9 @@ def _tests(v: Any, path: str) -> dict[str, Any] | None:
         "head_run": _run(d.get("head_run"), f"{path}.head_run"),
         "old_tests_on_head": old_out,
     }
+    if d.get("projects") is not None:  # optional (v1.0): per-project summaries
+        out["projects"] = _list(d.get("projects"), f"{path}.projects", _project, 20)
+    return out
 
 
 def _snippet_run(v: Any, path: str) -> dict[str, Any]:

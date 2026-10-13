@@ -441,12 +441,13 @@ Put a `proofcheck.toml` at the repository root, or a `[tool.proofcheck]` table i
 <summary><b>All keys</b></summary>
 
 ```toml
-runner = "pytest"                      # pytest | unittest | jest
-test_command = "python -m pytest -x"   # optional; {junitxml} and {tests} placeholders supported
+runner = "pytest"                      # pytest | unittest | jest | cargo
+test_command = "python -m pytest -x"   # optional; {junitxml} and {tests} placeholders supported (cargo: a prefix, default "cargo test")
 test_patterns = ["tests/*", "test_*.py", "*_test.py", "conftest.py"]   # files copied from head into base
 test_module_patterns = ["test_*.py", "*_test.py"]                     # files that are run
-timeout = 600                          # seconds per test run
+timeout = 600                          # seconds per test run (cargo projects: 1800 unless set)
 setup_command = ""                     # optional, run in each worktree before tests (e.g. a build step)
+cargo_target_dir = ""                  # cargo: shared target dir (default $CARGO_TARGET_DIR, else <tmp>/proofcheck-cargo-target)
 large_diff_threshold = 1000            # changed lines
 max_issues = 5
 
@@ -492,9 +493,18 @@ enabled = false                        # the API key is never read from this fil
 provider = "openai"                    # or "anthropic"
 model = ""
 base_url = ""
+
+[[project]]                            # optional, repeatable: a test project in a subdirectory
+name = "python-sdk"                    # prefixes test ids when there is more than one project
+path = "adapters/python"               # relative POSIX path, no ".."; "." for the root
+runner = "pytest"                      # also: test_command, setup_command, test_paths, timeout, test_env, cargo_target_dir
 ```
 
 </details>
+
+**Several projects in one repository.** Without `[[project]]` tables the top-level keys describe the one project at the repository root, exactly as before. Each `[[project]]` table adds a project in a subdirectory (or replaces the root project when `path = "."`; the top-level `runner`/`test_command`/`setup_command`/`test_patterns` must then move into that table). Every changed file belongs to the deepest project that contains it, is classified by that project's runner, and its tests run with the project directory as the working directory in the base and head worktrees (Python: `<project>/src` and `<project>` go on `PYTHONPATH`). With more than one project, test ids are prefixed with the project name (`python-sdk:tests.test_client::test_x`), the card lists each project's status, and `result.json` gains `tests.projects`. `proofcheck init` detects projects (the root plus `pyproject.toml`, `setup.cfg`, `package.json` with a Jest test script and cargo workspace roots up to three levels deep, skipping `examples/`, `fixtures/`, `vendor/`, `packaging/`, `docs/` and the like) and writes the tables when it finds more than one.
+
+**Rust (`runner = "cargo"`).** Changed integration tests (`<crate>/tests/<name>.rs`) run per target with `cargo test -p <package> --test <name> --no-fail-fast -- --test-threads=1`; libtest's plain output is parsed (no nightly flags). When a PR changes a `#[cfg(test)] mod tests { ... }` block inside a `src/` file, only that module is transplanted from the head version into the base version of the file and run with `cargo test -p <package> --lib <module>::tests::` on both commits; files whose test module cannot be separated from the code by proofcheck's small lexer are skipped with a note. A test target that does not compile on the base commit counts as fail → pass, and the card says it failed only because it did not compile there (the API is new). Base, head and the diff evidence map share one `CARGO_TARGET_DIR` so dependencies compile once; the evidence workflow installs the toolchain from `rust-toolchain.toml` and uses `Swatinem/rust-cache` in the unprivileged job only. Allow 60–120 minutes (`timeout-minutes`) for large workspaces.
 
 **Environment variables**
 
@@ -540,7 +550,7 @@ proofcheck agent run     (propose + verify + refinement; local or trusted use on
 
 | `run` option | Purpose |
 |---|---|
-| `--runner pytest\|unittest\|jest` | choose the test runner (default from config, else `pytest`) |
+| `--runner pytest\|unittest\|jest\|cargo` | choose the test runner (default from config, else `pytest`) |
 | `--test-command "…"` | override the test command (split like a shell, never run through one) |
 | `--config FILE` | config file; by default config is read **from the base commit** |
 | `--context-file FILE` | PR title, body and issues from `proofcheck context` |
@@ -619,10 +629,11 @@ Python first: pytest (most complete) and stdlib `unittest`. Jest is experimental
 - Issue reproducers are Python only and are compared with the previous behaviour, not with an expected output.
 - The agent is experimental and often finds nothing. Its tests can be wrong, which is why they can never contradict a claim.
 - The Jest runner is experimental and has not been tested against many real projects.
+- Rust: only integration tests and inline `#[cfg(test)]` modules of changed files in existing crates are run (not doctests, benches or examples); `#[path]` module attributes, out-of-line `mod tests;` files and inline tests in new files are not handled. Build scripts and proc macros run on base and head like any test code.
 
 ## Roadmap
 
-- Runners for **Vitest**, **Go** (`go test` + `go-junit-report`), **Rust** (`cargo test`/nextest JUnit) and a hardened Jest runner
+- Runners for **Vitest**, **Go** (`go test` + `go-junit-report`), cargo-nextest (JUnit, per-test timeouts) and a hardened Jest runner
 - Optional mutation testing of changed lines, to report how strong the fail → pass tests are
 - Benchmark integrations (pytest-benchmark, hyperfine, criterion) and memory measurements
 - Reproducers in other languages, and expected-output assertions from issues

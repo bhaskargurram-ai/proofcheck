@@ -87,7 +87,8 @@ def _assess_fixes(claim: C.Claim, tests: TestCheck | None, repros: list[IssueRep
                 if s.base.exit_code not in (0, None) and s.head.exit_code == 0:
                     fixed_snippets.append(s)
     if f2p:
-        notes.append(f"{_plural(f2p, 'test')} {_agree(f2p, 'fails', 'fail')} on base and {_agree(f2p, 'passes', 'pass')} on head")
+        notes.append(f"{_plural(f2p, 'test')} {_agree(f2p, 'fails', 'fail')} on base and {_agree(f2p, 'passes', 'pass')} on head"
+                     + _build_only_note(tests, f2p))
     if fixed_snippets:
         notes.append(f"issue reproducer fails on base (exit {fixed_snippets[0].base.exit_code}) and succeeds on head")
     if notes:
@@ -108,6 +109,18 @@ def _assess_fixes(claim: C.Claim, tests: TestCheck | None, repros: list[IssueRep
     elif not notes:
         notes.append("no fail-to-pass test")
     return UNVERIFIED, "; ".join(notes)
+
+
+def _build_only_note(tests: TestCheck | None, f2p: int) -> str:
+    """" (n of them only because ...)" when fail->pass tests failed on base only by not compiling there."""
+    if tests is None:
+        return ""
+    n = sum(1 for t in tests.tests if t.touched and t.classification == FAIL_TO_PASS
+            and getattr(t, "base_failure_kind", "") == "build")
+    if not n:
+        return ""
+    who = "it fails" if f2p == 1 else ("all of them fail" if n == f2p else f"{n} of them fail")
+    return f" ({who} on base only because the test does not compile there)"
 
 
 def _assess_adds_tests(tests: TestCheck | None) -> tuple[str, str]:

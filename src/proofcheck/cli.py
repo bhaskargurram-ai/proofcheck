@@ -95,7 +95,7 @@ main.add_command(_agent_group)
               help="File with an issue body to reproduce (repeatable).")
 @click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False),
               help="Config file. Default: proofcheck.toml / [tool.proofcheck] read from the BASE commit.")
-@click.option("--runner", type=click.Choice(["pytest", "unittest", "jest"]), default=None, help="Override the test runner.")
+@click.option("--runner", type=click.Choice(["pytest", "unittest", "jest", "cargo"]), default=None, help="Override the test runner.")
 @click.option("--test-command", default=None, help="Override the test command (shell-style string, never run through a shell).")
 @click.option("--event", "event_path", type=click.Path(dir_okay=False), default=None,
               help="GitHub event payload (default: $GITHUB_EVENT_PATH when set).")
@@ -306,7 +306,7 @@ def summary_cmd(json_path: str, out_path: str | None) -> None:
 @click.option("--agent", is_flag=True, help="Also add the (experimental, opt-in) agent evidence workflow.")
 @click.option("--force", is_flag=True, help="Overwrite existing files.")
 @click.option("--ref", default=None, help="proofcheck release (tag or commit SHA) the workflows use. Default: this version's tag.")
-@click.option("--runner", type=click.Choice(["pytest", "unittest", "jest"]), default=None, help="Override runner detection.")
+@click.option("--runner", type=click.Choice(["pytest", "unittest", "jest", "cargo"]), default=None, help="Override runner detection.")
 def init_cmd(repo: str, agent: bool, force: bool, ref: str | None, runner: str | None) -> None:
     """Write caller workflows and a commented proofcheck.toml into a repository."""
     from .init_cmd import InitError, init_repo
@@ -315,7 +315,14 @@ def init_cmd(repo: str, agent: bool, force: bool, ref: str | None, runner: str |
         res = init_repo(repo, agent=agent, force=force, ref=ref, runner=runner)
     except InitError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"Detected test runner: {res.runner} ({res.reason})")
+    if res.projects:
+        click.echo(f"Detected {len(res.projects)} test projects (written as [[project]] tables):")
+        for p in res.projects:
+            click.echo(f"  {p.name}: {p.path} ({p.runner}; {p.reason})")
+    else:
+        click.echo(f"Detected test runner: {res.runner} ({res.reason})")
+    for path, why in res.skipped:
+        click.echo(f"  skipped {path}: {why}")
     for path in res.written:
         click.echo(f"  wrote {path}")
     click.echo("")

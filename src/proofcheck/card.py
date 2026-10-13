@@ -43,6 +43,14 @@ TEST_LABELS = {
     "error": "error",
     "skipped": "skipped",
 }
+PROJECT_STATUS_LABELS = {
+    "evidence": "evidence",
+    "no_evidence": "no evidence",
+    "fail_on_head": "fails on head",
+    "no_tests": "no tests changed",
+    "error": "error",
+    "skipped": "skipped",
+}
 VERDICT_HEADLINES = {
     "evidence": "✅ The PR's claims are backed by evidence",
     "partial": "⚠️ Some claims are backed by evidence, others are not",
@@ -165,6 +173,16 @@ def _tests_section(result: dict[str, Any]) -> list[str]:
         out.append("❌ Some changed tests **fail on the PR head**.")
     elif status == "error":
         out.append("❔ The tests could not be run to completion; see notes.")
+    projects = tests.get("projects") or []
+    if len(projects) > 1 or any(p.get("path") not in (".", "") for p in projects):
+        shown = []
+        for p in projects[:10]:
+            c = p.get("counts") or {}
+            where = "" if p.get("path") in (".", "") else f" in {code(p.get('path'), 60)}"
+            shown.append(f"{code(p.get('name'), 40)} ({escape_md(p.get('runner'), 12)}{where}): "
+                         f"{escape_md(PROJECT_STATUS_LABELS.get(p.get('status'), p.get('status')), 30)}"
+                         + (f", {c.get('fail_to_pass', 0)} fail→pass" if c.get("fail_to_pass") else ""))
+        out += ["", "Projects: " + " · ".join(shown)]
     rows = [t for t in tests.get("tests", []) if t.get("touched", True)]
     if rows:
         out += ["", "| Result | Test | Base | Head |", "|---|---|---|---|"]
@@ -176,6 +194,10 @@ def _tests_section(result: dict[str, Any]) -> list[str]:
             out.append(f"| | _…and {len(rows) - MAX_TEST_ROWS} more (see result.json)_ | | |")
     old = tests.get("old_tests_on_head") or {}
     notes = list(tests.get("notes") or [])
+    build = [t for t in rows if t.get("base_failure_kind") == "build" and t["classification"] == "fail_to_pass"]
+    if build:
+        notes.insert(0, f"{len(build)} fail→pass test(s) fail on base only because they do not compile there "
+                        f"(weaker evidence: the API they use is new): {build[0].get('message', '')}")
     if old.get("ran"):
         if old.get("failing"):
             notes.append(f"The base versions of {len(old.get('files', []))} modified test file(s) fail on head "

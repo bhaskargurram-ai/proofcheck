@@ -318,6 +318,25 @@ jobs:
           name: proofcheck-candidates
           path: proofcheck-out/candidates
 
+      # Rust projects. rustup is preinstalled on ubuntu-latest; installing the
+      # toolchain that the PR's rust-toolchain.toml names is PR-controlled
+      # configuration, so it only runs in this job (no secrets, read-only token, no cache).
+      - name: Set up Rust (honours rust-toolchain.toml; runs PR-controlled config)
+        if: hashFiles('**/Cargo.toml') != ''
+        run: |
+          set -euo pipefail
+          if [ -f rust-toolchain.toml ] || [ -f rust-toolchain ]; then
+            rustup toolchain install || rustup show active-toolchain
+          else
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustc --version
+          cargo --version
+          # One target directory for the base, head and ablation worktrees.
+          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
+          echo "CARGO_TERM_COLOR=never" >> "$GITHUB_ENV"
+
       - name: Install the project under test (runs PR code)
         env:
           INSTALL_COMMAND: ${{ inputs.install-command }}

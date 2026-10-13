@@ -10,7 +10,10 @@ break the trust-zone split:
 * comment.yml never checks out the pull request and never installs a project;
 * agent.yml: ``propose`` (holds the key) never installs or runs the PR, which
   it checks out into ``pr/`` as data; ``verify`` (runs PR code) references no
-  secrets, has a read-only token and uses no caches; ``gate`` checks nothing out.
+  secrets, has a read-only token and uses no caches; ``gate`` checks nothing out;
+* Rust: the toolchain is set up (PR-controlled rust-toolchain.toml) only after
+  the token step, and ``Swatinem/rust-cache`` only appears in the unprivileged
+  ``pull_request`` evidence job, never in a ``workflow_run`` workflow.
 """
 
 import json
@@ -143,6 +146,46 @@ class WorkflowSecurityTest(unittest.TestCase):
         pages = load(WF_DIR / "pages.yml")
         self.assertEqual(pages["jobs"]["deploy"]["if"], "github.event.repository.private == false")
         self.assertIn("workflow_dispatch", pages["on"])
+
+    def test_rust_cache_only_in_the_unprivileged_evidence_job(self):
+        for path, wf in self.all_workflows():
+            for name, job in (wf.get("jobs") or {}).items():
+                for s in steps(job):
+                    uses = str(s.get("uses", ""))
+                    if "rust-cache" in uses or uses.startswith("actions/cache"):
+                        self.assertEqual((path.name, name), ("evidence.yml", "evidence"), uses)
+                        self.assertEqual(wf["jobs"][name]["if"], "github.event_name == 'pull_request'")
+            on = wf["on"]
+            if isinstance(on, dict) and "workflow_run" in on:
+                self.assertNotIn("rust-cache", json.dumps(wf))
+        for name in ("comment.yml", "agent.yml"):
+            self.assertNotIn("rust-cache", (WF_DIR / name).read_text())
+
+    def test_rust_setup_runs_after_the_token_step(self):
+        job = load(WF_DIR / "evidence.yml")["jobs"]["evidence"]
+        names = [s.get("name") or s.get("uses") for s in steps(job)]
+        rust = next(n for n in names if n.startswith("Set up Rust"))
+        cache = next(n for n in names if n.startswith("Cache Rust"))
+        ctx = names.index("Collect PR context (before any PR code runs)")
+        self.assertLess(ctx, names.index(rust))
+        self.assertLess(names.index(rust), names.index(cache))
+        self.assertLess(names.index(cache), names.index("Run proofcheck (runs PR code; no token)"))
+        for s in steps(job):
+            if s.get("name") in (rust, cache):
+                self.assertEqual(s["if"], "hashFiles('**/Cargo.toml') != ''")
+                self.assertNotIn("token", json.dumps(s))
+        wf = load(WF_DIR / "evidence.yml")
+        self.assertGreaterEqual(wf["on"]["workflow_call"]["inputs"]["timeout-minutes"]["default"], 60)
+        install = next(s for s in steps(job) if s.get("name") == "Install the project under test (runs PR code)")
+        self.assertIn('eval "$INSTALL_COMMAND"', install["run"])  # an empty install-command is a no-op
+
+        jobs = load(WF_DIR / "agent.yml")["jobs"]
+        vnames = [s.get("name") or s.get("uses") for s in steps(jobs["verify"])]
+        vrust = next(n for n in vnames if n.startswith("Set up Rust"))
+        self.assertLess(vnames.index(vrust), vnames.index("Run the candidate tests on base and head (runs PR code; no LLM)"))
+        for job_name in ("gate", "propose"):  # never build or run the PR there
+            self.assertNotIn("rustup", json.dumps(jobs[job_name]))
+            self.assertNotIn("cargo", json.dumps(jobs[job_name]))
 
     def test_action_yml_inputs_reach_scripts_via_env_only(self):
         action = load(_helpers.ROOT / "action.yml")
