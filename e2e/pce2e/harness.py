@@ -223,6 +223,8 @@ class OnlineRunner:
         self.sset, self.scenarios, self.gh, self.opts, self.log = sset, list(scenarios), gh, opts, log
         self.workdir, self.token, self.clock, self.sleep = Path(workdir), token, clock, sleep
         self.runs: list[_Run] = []
+        self.leftover_branches: list[str] = []
+        self.git: Git | None = None
         self.report = Report(mode="online", scenario_set=sset.name, repo=opts.repo, started=_now())
 
     # -- setup -------------------------------------------------------------------------
@@ -366,7 +368,25 @@ class OnlineRunner:
                 r.cleanup.append(label if out is not False else label + " (already gone)")
             except Exception as exc:  # cleanup must go on
                 r.cleanup.append(f"FAILED: {label.replace('closed', 'close').replace('deleted', 'delete')}: {self.log.redact(exc)}")
+                if label.startswith("deleted branch "):
+                    self.leftover_branches.append(label[len("deleted branch "):])
             self.log(r.cleanup[-1], r)
+
+    def _delete_leftover_branches(self) -> None:
+        """Retry refused API branch deletions with one `git push --delete`; report what remains."""
+        if not self.leftover_branches:
+            return
+        branches = list(dict.fromkeys(self.leftover_branches))
+        if self.git is not None:
+            try:
+                self.git("push", "-q", "origin", "--delete", *branches)
+                self.log(f"deleted {len(branches)} branch(es) with git push --delete after the API refused")
+                return
+            except GitError as exc:
+                self.log(f"git push --delete also failed: {self.log.redact(exc)}")
+        self.report.notes.append(
+            f"{len(branches)} branch(es) could not be deleted (the token may not be allowed to delete refs). "
+            "Delete them with: git push origin --delete " + " ".join(branches))
 
     def run(self) -> Report:
         stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
@@ -378,6 +398,7 @@ class OnlineRunner:
             info = self.gh.get_repo()
             default = str(info.get("default_branch") or "main")
             git = self._clone(default)
+            self.git = git
             for run in self.runs:
                 try:
                     self._open(git, run, default, stamp)
@@ -397,6 +418,7 @@ class OnlineRunner:
                     run.result.status, run.result.error = "error", "interrupted"
                 self._cleanup(run)
                 run.result.duration_s = self.clock() - run.t0
+            self._delete_leftover_branches()
             self.report.finished = _now()
         return self.report
 

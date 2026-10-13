@@ -513,8 +513,9 @@ class FakeGitHubServer:
     bare repository that the harness pushes to.
     """
 
-    def __init__(self, bare, card_for, delay_polls=1, fail_pull=False, label_lag=0):
+    def __init__(self, bare, card_for, delay_polls=1, fail_pull=False, label_lag=0, refuse_delete=False):
         self.bare = bare
+        self.refuse_delete = refuse_delete
         self.label_lag = label_lag
         self.card_for = card_for
         self.delay_polls = delay_polls
@@ -569,6 +570,8 @@ class FakeGitHubServer:
                     out.append({"id": 2, "body": body, "user": BOT})
                     self.labels[n] = [x for x in self.labels.get(n, []) if not x.startswith("proofcheck: ")] + list(labels)
             return FakeResponse(200, out)
+        if method == "DELETE" and parts[:3] == ["git", "refs", "heads"] and self.refuse_delete:
+            return FakeResponse(403, {"message": "Write access to this GitHub API path is not permitted"})
         if method == "DELETE" and parts[:3] == ["git", "refs", "heads"]:
             branch = "/".join(parts[3:])
             if self._sha(branch) is None:
@@ -658,6 +661,28 @@ class OnlineRunnerTest(TempDirCase):
         self.assertIn("closed PR", "\n".join(good.cleanup))
         self.assertTrue(all(s <= 40 for s in self.slept))  # backoff is capped
         self.assertIn("waiting up to 100s for the agent section", self.output)
+
+    def test_refused_api_branch_deletes_fall_back_to_git(self):
+        # Some tokens may not delete refs through the API; the harness retries
+        # once with `git push --delete` and only reports what still remains.
+        server = FakeGitHubServer(self.bare, self.cards, refuse_delete=True)
+        rep = self.run_harness(server)
+        self.assertTrue(rep.ok, [(r.name, r.status, r.failures, r.error) for r in rep.results])
+        refs = subprocess.run(["git", "-C", str(self.bare), "for-each-ref", "--format=%(refname)"],
+                              capture_output=True, text=True).stdout.split()
+        self.assertEqual(refs, ["refs/heads/main"])
+        self.assertIn("deleted 4 branch(es) with git push --delete", self.output)
+        self.assertFalse(any("could not be deleted" in n for n in rep.notes))
+
+    def test_branches_that_cannot_be_deleted_are_reported(self):
+        server = FakeGitHubServer(self.bare, self.cards, refuse_delete=True)
+        hook = self.bare / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\nwhile read old new ref; do [ \"$new\" = 0000000000000000000000000000000000000000 ] && exit 1; done\nexit 0\n")
+        hook.chmod(0o755)
+        rep = self.run_harness(server)
+        note = next(n for n in rep.notes if "could not be deleted" in n)
+        self.assertIn("git push origin --delete proofcheck-e2e/", note)
+        self.assertEqual(note.count("proofcheck-e2e/"), 4)
 
     def test_agent_grace_expires(self):
         server = FakeGitHubServer(self.bare, lambda pr, polls: (make_card(pr["sha"], verdict="no_evidence", f2p=0, warnings=1),
