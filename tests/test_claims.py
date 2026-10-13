@@ -33,6 +33,19 @@ class IssueReferenceTest(unittest.TestCase):
                      "Fixes #0"):
             self.assertNotIn(C.FIXES_ISSUE, types(text), text)
 
+    def test_negated_references_are_not_claims(self):
+        for text in ("This does not fix #3; it only renames variables.", "Note: it doesn't close #9 yet.",
+                     "It doesn’t resolve #2 (curly apostrophe).",
+                     "This PR no longer fixes #4, see the follow-up."):
+            self.assertNotIn(C.FIXES_ISSUE, types(text), text)
+        nums = [c.details["number"] for c in C.extract_claims("", "Fixes #5. It does not fix #6.")]
+        self.assertEqual(nums, [5])
+
+    def test_quoted_mentions_are_not_claims(self):
+        body = 'The parser now recognises "15.5 s → 0.28 s" and “fixes #7” as phrases. It is 2x faster.'
+        cs = C.extract_claims("", body)
+        self.assertEqual([c.text for c in cs], ["2x faster"])
+
     def test_code_blocks_comments_and_quotes_are_ignored(self):
         body = "Some change.\n\n```\nfixes #1\n```\n<!-- closes #2 -->\n> resolves #3\nUse `fixes #4` syntax."
         self.assertEqual(types(body), [])
@@ -79,6 +92,21 @@ class PerformanceClaimTest(unittest.TestCase):
         (c,) = self.perf("Import time went from 1.2 s to 300 ms")
         self.assertAlmostEqual(c.details["factor"], 4.0)
 
+    def test_arrow_notation(self):
+        (c,) = self.perf("jnp.unique: 15.5 s → 0.28 s")
+        self.assertAlmostEqual(c.details["factor"], 15.5 / 0.28)
+        (c,) = self.perf("Cold start 162s -> 0.22s on CI.")
+        self.assertAlmostEqual(c.details["factor"], 162 / 0.22)
+        (c,) = self.perf("Peak memory 3 GB => 1 GB")
+        self.assertEqual(c.details["metric"], "memory")
+        self.assertEqual(self.perf("Latency 0.2 s -> 1.5 s"), [])  # slower is not a speedup claim
+
+    def test_speeds_up_by(self):
+        (c,) = self.perf("This speeds up parsing by 2.5x.")
+        self.assertAlmostEqual(c.details["factor"], 2.5)
+        (c,) = self.perf("Caching sped up the whole build by ~3x")
+        self.assertAlmostEqual(c.details["factor"], 3.0)
+
     def test_negatives(self):
         for text in (
             "Upgrade to python 3x",
@@ -110,6 +138,10 @@ class PhraseClaimTest(unittest.TestCase):
     def test_adds_tests_negatives(self):
         for text in ("No tests added.", "I did not add tests", "Tests are not included", "Without tests for now", "the test suite is slow"):
             self.assertNotIn(C.ADDS_TESTS, types(text), text)
+
+    def test_contracted_negation(self):
+        self.assertNotIn(C.BACKWARDS_COMPATIBLE, types("This isn't backwards compatible."))
+        self.assertNotIn(C.NO_BEHAVIOR_CHANGE, types("It wasn't a pure refactor."))
 
     def test_backwards_compatible(self):
         for text in ("This is backwards compatible.", "Fully backward-compatible", "No breaking changes."):
