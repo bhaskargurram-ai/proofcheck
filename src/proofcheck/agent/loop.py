@@ -20,13 +20,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from ..projects import Project
 from ..runners import TestRunner
 from . import FAIL_TO_PASS, STATUS_ERROR, STATUS_SKIPPED
 from .config import AgentConfig
 from .llm_tools import LLMConfigError, LLMToolError, ToolLLM, Turn
 from .prompts import feedback_message
 from .propose import CAND_ERROR, SUBMITTED, Proposal, VariantSession, propose, redact, update_manifest, write_proposal
-from .verify import CandidateOutcome, build_section, run_candidates
+from .verify import CandidateOutcome, build_section, root_target, run_candidates
 
 RUN_WARNING = (
     "WARNING: `proofcheck agent run` executes LLM-written test code on this machine, in the same process tree that "
@@ -54,7 +55,8 @@ def _refine(session: VariantSession, outcome: CandidateOutcome | None, budget: A
     snapshot = (session.status, session.code, session.rationale, session.targets_claim, list(session.repairs))
     if outcome is not None:
         details = f"{outcome.message}\n\n{outcome.output}"[-4000:]
-        session.turns.append(Turn("user", text=feedback_message(outcome.classification, details, session.tools.nonce)))
+        language = "rust" if session.rust is not None else "python"
+        session.turns.append(Turn("user", text=feedback_message(outcome.classification, details, session.tools.nonce, language)))
     else:
         session.turns.append(Turn("user", text="proofcheck: no test was accepted yet. Call submit_test with a complete test file."))
     session.status = "no_submission"
@@ -88,10 +90,17 @@ def run_agent(
     secrets_: Sequence[str] = (),
     out_dir: str | Path | None = None,
     log: Callable[[str], None] = lambda s: None,
+    projects: Sequence[Project] | None = None,
 ) -> AgentRun:
-    """Propose, verify, then refine for up to ``agent_cfg.max_rounds`` rounds."""
+    """Propose, verify, then refine for up to ``agent_cfg.max_rounds`` rounds.
+
+    ``projects`` as for :func:`~proofcheck.agent.propose.propose`; without them
+    ``runner`` (with ``setup_command``) is the only, root project.
+    """
+    if not projects:
+        projects = [root_target(runner, agent_cfg.timeout_for(runner.name), setup_command).project]
     proposal = propose(repo, base, head, agent_cfg=agent_cfg, runner=runner, llm_factory=llm_factory, pr_title=pr_title,
-                       pr_body=pr_body, issues=issues, result=result, secrets_=secrets_, log=log)
+                       pr_body=pr_body, issues=issues, result=result, secrets_=secrets_, log=log, projects=projects)
     run = AgentRun(proposal)
     manifest = proposal.manifest
     if manifest["status"] in (STATUS_SKIPPED, STATUS_ERROR):
@@ -100,9 +109,13 @@ def run_agent(
             write_proposal(out_dir, proposal)
         return run
     mb, head_sha = manifest["merge_base"], manifest["head"]
+    target = proposal.target
+    assert target is not None
+    project = target.project
+    timeout = agent_cfg.timeout_for(project.runner.name, project.timeout)
     latest: dict[str, CandidateOutcome] = {}
-    outcomes = run_candidates(runner, repo, mb, head_sha, _submitted(proposal.sessions), env, agent_cfg.test_timeout,
-                              setup_command, run.notes)
+    outcomes = run_candidates(project.runner, repo, mb, head_sha, _submitted(proposal.sessions), env, timeout,
+                              None, run.notes, target=target)
     run.outcomes.extend(outcomes)
     latest.update({o.variant: o for o in outcomes})
     run.rounds = 1
@@ -122,7 +135,8 @@ def run_agent(
                 revised.append(s)
         if not revised:
             break
-        new = run_candidates(runner, repo, mb, head_sha, _submitted(revised), env, agent_cfg.test_timeout, setup_command, run.notes)
+        new = run_candidates(project.runner, repo, mb, head_sha, _submitted(revised), env, timeout, None, run.notes,
+                             target=target)
         run.outcomes.extend(new)
         latest.update({o.variant: o for o in new})
         run.rounds = rnd + 1

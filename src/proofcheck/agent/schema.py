@@ -30,18 +30,33 @@ def _r():  # lazy import: proofcheck.result imports this module lazily too
     return R
 
 
-def validate_candidate_path(path: Any, test_dir: str) -> str:
-    """A candidate file must be ``<test_dir>/test_*.py`` with a safe relative path."""
+def validate_candidate_path(path: Any, test_dir: str, language: str = "python") -> str:
+    """A candidate file must be ``<test_dir>/test_*.py`` (Python) or
+    ``<test_dir>/proofcheck_agent_*.rs`` (Rust), with a safe relative path."""
+    from .target import RUST, candidate_file_ok
+
     if not isinstance(path, str) or not path:
         raise ManifestError("candidate file must be a non-empty string")
-    p = PurePosixPath(path)
     if path.startswith("/") or "\\" in path or any(part in ("", ".", "..") for part in path.split("/")):
         raise ManifestError(f"unsafe candidate path {path[:100]!r}")
-    if str(p.parent) != test_dir or not p.name.startswith("test_") or p.suffix != ".py" or len(path) > 300:
-        raise ManifestError(f"candidate path must be {test_dir}/test_*.py, not {path[:100]!r}")
-    if not all(c.isalnum() or c in "_." for c in p.name):
-        raise ManifestError(f"candidate file name has unexpected characters: {p.name[:60]!r}")
+    pattern = "proofcheck_agent_*.rs" if language == RUST else "test_*.py"
+    if str(PurePosixPath(path).parent) != test_dir or len(path) > 300:
+        raise ManifestError(f"candidate path must be {test_dir}/{pattern}, not {path[:100]!r}")
+    if not candidate_file_ok(path, test_dir, language):
+        name = PurePosixPath(path).name
+        if language != RUST and name.startswith("test_") and name.endswith(".py"):
+            raise ManifestError(f"candidate file name has unexpected characters: {name[:60]!r}")
+        raise ManifestError(f"candidate path must be {test_dir}/{pattern}, not {path[:100]!r}")
     return path
+
+
+def _crate(v: Any, path: str) -> dict[str, str] | None:
+    R = _r()
+    d = R._dict(v, path, optional=True)
+    if d is None:
+        return None
+    return {"dir": R._str(d.get("dir", ""), f"{path}.dir", 300), "package": R._str(d.get("package", ""), f"{path}.package", 100),
+            "lib": R._str(d.get("lib", ""), f"{path}.lib", 100)}
 
 
 def _usage(v: Any, path: str) -> dict[str, int]:
@@ -71,6 +86,11 @@ def load_manifest(candidates_dir: str | Path) -> dict[str, Any]:
             test_dir = validate_test_dir(d.get("test_dir"))
         except AgentConfigError as exc:
             raise ManifestError(str(exc)) from exc
+        from .target import LANGUAGES, PYTHON
+
+        language = d.get("language") or PYTHON
+        if language not in LANGUAGES:
+            raise ManifestError(f"unknown candidate language {str(language)[:20]!r}")
         out = {
             "schema": MANIFEST_SCHEMA, "version": MANIFEST_VERSION,
             "status": R._str(d.get("status", ""), "$.status", 40),
@@ -86,21 +106,29 @@ def load_manifest(candidates_dir: str | Path) -> dict[str, Any]:
             "variants": [v for v in R._list(d.get("variants"), "$.variants", lambda x, q: R._str(x, q, 40), 10) if v in VARIANTS],
             "usage": _usage(d.get("usage"), "$.usage"),
             "cost_usd": R._num(d.get("cost_usd"), "$.cost_usd", optional=True),
-            "candidates": R._list(d.get("candidates"), "$.candidates", lambda x, q: _manifest_candidate(x, q, test_dir), 10),
+            "candidates": R._list(d.get("candidates"), "$.candidates",
+                                  lambda x, q: _manifest_candidate(x, q, test_dir, language), 10),
+            # Multi-project / Rust fields (absent in manifests written before v1: Python at the root project).
+            "language": language,
+            "project": R._str(d.get("project", ""), "$.project", 60),
+            "project_path": R._str(d.get("project_path", ""), "$.project_path", 300),
+            "runner": R._str(d.get("runner", ""), "$.runner", 20),
+            "crate": _crate(d.get("crate"), "$.crate"),
+            "target_reason": R._str(d.get("target_reason", ""), "$.target_reason", 300),
         }
     except R.ResultValidationError as exc:
         raise ManifestError(f"invalid manifest: {exc}") from exc
     return out
 
 
-def _manifest_candidate(v: Any, path: str, test_dir: str) -> dict[str, Any]:
+def _manifest_candidate(v: Any, path: str, test_dir: str, language: str = "python") -> dict[str, Any]:
     R = _r()
     d = R._dict(v, path)
     variant = R._enum(d.get("variant"), VARIANTS, f"{path}.variant")
     status = R._enum(d.get("status"), ("submitted", "no_submission", "invalid", "error"), f"{path}.status")
     file = d.get("file") or ""
     if status == "submitted":
-        file = validate_candidate_path(file, test_dir)
+        file = validate_candidate_path(file, test_dir, language)
     else:
         file = ""
     return {
@@ -192,4 +220,7 @@ def validate_agent_section(v: Any, path: str = "$.agent") -> dict[str, Any] | No
         "upgraded_claims": R._list(d.get("upgraded_claims"), f"{path}.upgraded_claims",
                                    lambda x, q: R._int(x, q, minimum=0), 50),
         "notes": R._list(d.get("notes"), f"{path}.notes", lambda x, q: R._str(x, q, 500), 10),
+        # v1 (additive): the project the candidates ran in and their language ("python" | "rust").
+        "project": R._str(d.get("project", ""), f"{path}.project", 60),
+        "language": R._enum(d.get("language") or "python", ("python", "rust"), f"{path}.language"),
     }

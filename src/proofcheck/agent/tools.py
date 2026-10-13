@@ -149,6 +149,12 @@ READ_ONLY_TOOLS = [
              {"type": "object", "properties": {}, "additionalProperties": False}),
 ]
 
+#: Offered only for cargo projects (see :attr:`RepoTools.crates_text`).
+LIST_CRATES_TOOL = ToolSpec(
+    "list_crates", "List the Rust crates (Cargo packages) of the project at head: directory, package name and the "
+    "library crate name to `use` in an integration test, plus where your test will be stored and how it runs.",
+    {"type": "object", "properties": {}, "additionalProperties": False})
+
 SUBMIT_TOOL = ToolSpec(
     "submit_test",
     "Submit the complete reproduction test file. This is your only way to deliver output. "
@@ -203,12 +209,14 @@ class RepoTools:
     issue_text: str = ""  # already wrapped as untrusted data
     is_test_module: Callable[[str], bool] = lambda p: False
     test_info: str = ""
+    #: Crate list for cargo projects; when set, the ``list_crates`` tool is offered.
+    crates_text: str = ""
     max_result_chars: int = MAX_RESULT_CHARS
     calls: int = 0
     log: list[dict[str, Any]] = field(default_factory=list)
 
     def specs(self) -> list[ToolSpec]:
-        return list(READ_ONLY_TOOLS)
+        return list(READ_ONLY_TOOLS) + ([LIST_CRATES_TOOL] if self.crates_text else [])
 
     # -- plumbing ------------------------------------------------------------------------
     def _git(self, *args: str, timeout: float = GIT_TIMEOUT) -> tuple[int, bytes]:
@@ -236,6 +244,8 @@ class RepoTools:
             "list_files": self.list_files, "read_file": self.read_file, "grep": self.grep,
             "get_diff": self.get_diff, "get_issue": self.get_issue, "list_tests": self.list_tests,
         }
+        if self.crates_text:
+            handlers["list_crates"] = self.list_crates
         handler = handlers.get(call.name)
         if handler is None:
             return ToolResult(call.id, call.name, f"unknown tool {call.name[:60]!r}; available: {', '.join(handlers)}, submit_test", True)
@@ -372,6 +382,11 @@ class RepoTools:
         shown = "\n".join(paths[:MAX_LIST_ENTRIES]) or "(no test modules found)"
         more = f"\n[... {len(paths) - MAX_LIST_ENTRIES} more]" if len(paths) > MAX_LIST_ENTRIES else ""
         return (self.test_info + "\n\n" if self.test_info else "") + f"Test modules at head ({len(paths)}):\n" + shown + more
+
+
+    def list_crates(self, args: dict[str, Any]) -> str:
+        _check_keys(args, set())
+        return self.crates_text
 
 
 def _check_keys(args: dict[str, Any], allowed: set[str]) -> None:

@@ -21,6 +21,12 @@ runners and JUnit parsing as the fail-to-pass check). Classification:
 ``error``
     the runner produced no usable report.
 
+Rust (cargo) candidates are integration tests: any runtime failure on base
+(a failed assertion or a panic) is behavioural, so strong; a candidate that
+does not *compile* on base (it uses an item the PR adds) is weak, like a
+Python ``ImportError``. A candidate that does not compile on head fails on
+head (inconclusive).
+
 Agent evidence never contradicts a claim. A strong candidate upgrades a
 matching unverified ``fixes #N`` claim to ``verified`` (marked
 ``verified_by: agent``); nothing else about the result changes.
@@ -42,7 +48,8 @@ from ..failtopass import classify_runs, is_collection_error_id
 from ..junit import ERROR as J_ERROR
 from ..junit import FAILED as J_FAILED
 from ..junit import TestOutcome
-from ..proc import run_command
+from ..config import ROOT_PROJECT_NAME
+from ..projects import Project, setup_projects
 from ..runners import RunResult, TestRunner
 from . import (
     AGENT_EVIDENCE_TEXT,
@@ -60,15 +67,20 @@ from . import (
     STATUS_SKIPPED,
     STATUS_WEAK,
 )
+from .config import AgentConfig
+from .ruststatic import RustTarget, validate_rust_test
 from .schema import MAX_CODE_IN_RESULT, ManifestError, read_candidate
+from .target import PYTHON, RUST, AgentTarget, TargetError, check_manifest_target
 
 #: Exceptions that mean "this name does not exist on base" rather than "the bug".
 MISSING_SYMBOL = {"ImportError", "ModuleNotFoundError", "AttributeError", "NameError", "UnboundLocalError"}
 _SIGNATURE_RE = re.compile(r"unexpected keyword argument|positional argument|required (?:keyword-only |positional )?argument|takes no arguments")
 _EXC_PREFIX_RE = re.compile(r"^\s*(?:E\s+)?([A-Za-z_][\w.]*?(?:Error|Exception|Exit|Interrupt|Warning|Failure))\b(?::|$)")
 _E_LINE_RE = re.compile(r"^E\s+([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|Warning))\b", re.M)
+_TB_EXC_RE = re.compile(r"^([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|Warning|Failure)):", re.M)
 _TRAILER_RE = re.compile(r":\d+: ([A-Za-z_][\w.]*)\s*$")
 
+BUILD = "build"  # TestOutcome.kind of a cargo target that does not compile
 STRONG = "behavioural"
 WEAK = "missing_symbol"
 UNKNOWN = "unknown"
@@ -96,7 +108,11 @@ def exception_name(o: TestOutcome | None) -> str:
         return "ImportError"
     # unittest_junit puts the last traceback line in the message.
     m = _EXC_PREFIX_RE.match(msg.splitlines()[-1]) if msg else None
-    return m.group(1).rsplit(".", 1)[-1] if m else ""
+    if m:
+        return m.group(1).rsplit(".", 1)[-1]
+    # A multi-line message (e.g. assertEqual's string diff): the last "XxxError: ..." line of the traceback.
+    found = _TB_EXC_RE.findall(detail)
+    return found[-1].rsplit(".", 1)[-1] if found else ""
 
 
 _PYTEST_LOC_RE = re.compile(r"^(\S+?):\d+: [A-Za-z_][\w.]*\s*$", re.M)
@@ -164,17 +180,26 @@ def classify_candidate(runner: TestRunner, path: str, base_run: RunResult, head_
     rows: list[dict[str, Any]] = []
     base_coll = next((o for tid, o in base_run.outcomes.items()
                       if is_collection_error_id(tid) and runner.test_belongs_to(tid, path) and o.outcome == J_ERROR), None)
+    rust = runner.name == "cargo"
     for t in tests:
         base_o = base_run.outcomes.get(t.test_id)
         kind = ""
-        if t.classification == FT_FAIL_TO_PASS:
+        base_kind = ""
+        if t.classification == FT_FAIL_TO_PASS and rust:
+            if base_o is None and base_coll is not None and base_coll.kind == BUILD:
+                kind, base_kind = WEAK, "build error"  # does not compile on base: the API is new
+            elif base_o is not None:
+                kind, base_kind = STRONG, "panic"  # an assertion failed or the crate's code panicked
+            else:
+                kind = UNKNOWN
+        elif t.classification == FT_FAIL_TO_PASS:
             kind = failure_kind(base_o if base_o is not None else base_coll, path)
             if base_o is None and base_coll is not None and kind == STRONG:
                 kind = WEAK  # the whole module failed to import on base
             if base_o is None and base_coll is None:
                 kind = UNKNOWN
-        rows.append({"test_id": t.test_id, "base": t.base, "head": t.head,
-                     "base_kind": exception_name(base_o if base_o is not None else base_coll) if t.classification == FT_FAIL_TO_PASS else "",
+            base_kind = exception_name(base_o if base_o is not None else base_coll)
+        rows.append({"test_id": t.test_id, "base": t.base, "head": t.head, "base_kind": base_kind,
                      "message": t.message[:500], "_cls": t.classification, "_kind": kind})
     if not rows:
         return ERROR, "the test runner reported no tests for the candidate", []
@@ -188,6 +213,10 @@ def classify_candidate(runner: TestRunner, path: str, base_run: RunResult, head_
     if any(r["_kind"] == STRONG for r in f2p):
         r = next(r for r in f2p if r["_kind"] == STRONG)
         return FAIL_TO_PASS, f"fails on base ({r['base_kind'] or 'failure'}) and passes on head", clean
+    if f2p and rust and f2p[0]["base_kind"] == "build error":
+        why = f2p[0]["message"]
+        why = why[len("fails on base because it does not compile there: "):] if why.startswith("fails on base because") else why
+        return FAIL_TO_PASS_WEAK, f"fails on base only because it does not compile there ({why[:300]}), passes on head", clean
     if f2p:
         r = f2p[0]
         return FAIL_TO_PASS_WEAK, (f"fails on base only with {r['base_kind'] or 'an error before the test body ran'}"
@@ -209,13 +238,13 @@ def _write(wt: Path, rel: str, code: str) -> Path:
     return target
 
 
-def _setup(setup_command: Sequence[str] | None, wt: Path, env: Mapping[str, str], timeout: float) -> str | None:
-    if not setup_command:
-        return None
-    r = run_command(list(setup_command), cwd=wt, env=env, timeout=timeout)
-    if not r.ok:
-        return f"setup_command failed in {wt.name}: " + ("timed out" if r.timed_out else (r.launch_error or f"exit code {r.returncode}"))
-    return None
+def root_target(runner: TestRunner, timeout: float, setup_command: Sequence[str] | None = None,
+                test_dir: str = "tests/proofcheck_agent") -> AgentTarget:
+    """A target for a single-project (root) setup: the pre-v1 behaviour."""
+    from .target import language_of
+
+    project = Project(ROOT_PROJECT_NAME, ".", runner, timeout, list(setup_command) if setup_command else None)
+    return AgentTarget(project, language_of(runner.name) or PYTHON, test_dir)
 
 
 def run_candidates(
@@ -228,17 +257,30 @@ def run_candidates(
     timeout: float,
     setup_command: Sequence[str] | None = None,
     notes: list[str] | None = None,
+    target: AgentTarget | None = None,
 ) -> list[CandidateOutcome]:
-    """Run ``(manifest_entry, code)`` pairs on base and head worktrees and classify them."""
+    """Run ``(manifest_entry, code)`` pairs on base and head worktrees and classify them.
+
+    ``target`` gives the project (working directory, runner, environment,
+    setup) and the language; without it ``runner`` runs at the repository root.
+    Candidate paths in the entries are repository-relative.
+    """
     out: list[CandidateOutcome] = []
     if not candidates:
         return out
+    if target is None:
+        target = root_target(runner, timeout, setup_command)
+    project = target.project
+    runner = project.runner
+    penv = project.env(env)
     with gitmod.worktree(repo, merge_base, prefix="proofcheck-agent-base-") as bwt, \
             gitmod.worktree(repo, head_sha, prefix="proofcheck-agent-head-") as hwt:
         for wt in (bwt, hwt):
-            err = _setup(setup_command, wt, env, timeout)
-            if err and notes is not None:
-                notes.append(err)
+            errs = setup_projects([project], wt, env)
+            if notes is not None:
+                notes.extend(errs)
+        if target.language == RUST:
+            return _run_rust(target, bwt, hwt, candidates, penv, timeout)
         for entry, code in candidates:
             rel = entry["file"]
             co = CandidateOutcome(entry["variant"], rel, ERROR, rationale=entry.get("rationale", ""),
@@ -251,13 +293,14 @@ def run_candidates(
                 continue
             written = []
             try:
+                local = project.local(rel)
                 written = [_write(hwt, rel, code), _write(bwt, rel, code)]
-                head_run = runner.run(hwt, [rel], env, timeout)
-                base_run = runner.run(bwt, [rel], env, timeout)
-                co.classification, co.message, co.tests = classify_candidate(runner, rel, base_run, head_run)
+                head_run = runner.run(project.workdir(hwt), [local], penv, timeout)
+                base_run = runner.run(project.workdir(bwt), [local], penv, timeout)
+                co.classification, co.message, co.tests = classify_candidate(runner, local, base_run, head_run)
                 co.output = (f"--- head ---\n{head_run.output_tail[-1500:]}\n--- base ---\n{base_run.output_tail[-1500:]}")
-            except ManifestError as exc:
-                co.classification, co.message = ERROR, str(exc)
+            except (ManifestError, ValueError) as exc:
+                co.classification, co.message = ERROR, str(exc)[:500]
             finally:
                 for w in written:
                     try:
@@ -266,6 +309,57 @@ def run_candidates(
                         pass
             out.append(co)
     return out
+
+
+def _run_rust(target: AgentTarget, bwt: Path, hwt: Path, candidates: Sequence[tuple[dict[str, Any], str]],
+              env: Mapping[str, str], timeout: float) -> list[CandidateOutcome]:
+    """Rust: write every candidate first, then run all of them on head, then on base.
+
+    Each integration test file is its own test crate, so candidates cannot
+    affect each other, and grouping the runs by worktree means the shared
+    cargo target directory switches worktrees only once (each switch
+    rebuilds the workspace's own crates).
+    """
+    project, runner = target.project, target.project.runner
+    crate = target.crate
+    rust = RustTarget(crate.lib or "", crate.package) if crate is not None else None
+    outcomes: list[CandidateOutcome] = []
+    runnable: list[tuple[CandidateOutcome, str]] = []
+    written: list[Path] = []
+    try:
+        for entry, code in candidates:
+            rel = entry["file"]
+            co = CandidateOutcome(entry["variant"], rel, ERROR, rationale=entry.get("rationale", ""),
+                                  round=entry.get("round", 0), code=code)
+            outcomes.append(co)
+            if rust is None:
+                co.message = "no crate to run the candidate in"
+                continue
+            report = validate_rust_test(code, rust)
+            if not report.ok or report.code != code:
+                co.classification = INVALID
+                co.message = "static checks: " + ("; ".join(report.errors) or "the file needs repairs")[:400]
+                continue
+            try:
+                local = project.local(rel)
+                written += [_write(hwt, rel, code), _write(bwt, rel, code)]
+            except (ManifestError, ValueError) as exc:
+                co.message = str(exc)[:500]
+                continue
+            runnable.append((co, local))
+        head_runs = {co.file: runner.run(project.workdir(hwt), [local], env, timeout) for co, local in runnable}
+        base_runs = {co.file: runner.run(project.workdir(bwt), [local], env, timeout) for co, local in runnable}
+        for co, local in runnable:
+            head_run, base_run = head_runs[co.file], base_runs[co.file]
+            co.classification, co.message, co.tests = classify_candidate(runner, local, base_run, head_run)
+            co.output = (f"--- head ---\n{head_run.output_tail[-1500:]}\n--- base ---\n{base_run.output_tail[-1500:]}")
+    finally:
+        for w in written:
+            try:
+                w.unlink()
+            except OSError:
+                pass
+    return outcomes
 
 
 _RANK = {FAIL_TO_PASS: 0, FAIL_TO_PASS_WEAK: 1, PASS_TO_PASS: 2, FAILS_ON_HEAD: 3, ERROR: 4, INVALID: 5, NO_SUBMISSION: 6}
@@ -327,6 +421,8 @@ def build_section(manifest: dict[str, Any], outcomes: Sequence[CandidateOutcome]
             "code": winner.code[:MAX_CODE_IN_RESULT], "rationale": winner.rationale[:1000]},
         "upgraded_claims": [],
         "notes": list(notes)[:10],
+        "project": str(manifest.get("project") or "")[:60],
+        "language": str(manifest.get("language") or "")[:20],
     }
 
 
@@ -384,12 +480,20 @@ def verify_candidates_dir(
     base: str,
     head: str,
     candidates_dir: str | Path,
-    runner: TestRunner,
+    runner: TestRunner | None,
     env: Mapping[str, str],
-    timeout: float,
+    timeout: float | None,
     setup_command: Sequence[str] | None = None,
+    projects: Sequence[Project] | None = None,
+    agent_cfg: AgentConfig | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Load the manifest, run every submitted candidate and return ``(manifest, agent_section)``.
+
+    ``projects`` are the configured test projects; without them ``runner``
+    (with ``setup_command``) is the only, root project. The project and
+    directory the manifest names are re-validated against them
+    (:func:`proofcheck.agent.target.check_manifest_target`). ``timeout`` of
+    None uses ``agent_cfg.timeout_for`` the project's runner.
 
     Problems with the manifest or a mismatch between the manifest's commits
     and ``base``/``head`` give an ``error`` section rather than an exception.
@@ -399,6 +503,7 @@ def verify_candidates_dir(
     base_sha = gitmod.resolve_ref(repo, base)
     head_sha = gitmod.resolve_ref(repo, head)
     mb = gitmod.merge_base(repo, base_sha, head_sha)
+    agent_cfg = agent_cfg or AgentConfig()
     try:
         manifest = load_manifest(candidates_dir)
     except ManifestError as exc:
@@ -410,6 +515,19 @@ def verify_candidates_dir(
         return manifest, build_section(manifest, [], rounds=0)
     if manifest["status"] in (STATUS_SKIPPED, STATUS_ERROR):
         return manifest, build_section(manifest, [], rounds=0)
+    if not projects:
+        if runner is None:
+            raise ValueError("verify_candidates_dir needs a runner or projects")
+        t = timeout if timeout is not None else agent_cfg.timeout_for(runner.name)
+        projects = [root_target(runner, t, setup_command).project]
+    try:
+        target = check_manifest_target(manifest, projects, str(repo), head_sha)
+    except TargetError as exc:
+        manifest = dict(manifest, status=STATUS_ERROR, reason=str(exc)[:500])
+        return manifest, build_section(manifest, [], rounds=0)
+    project = target.project
+    if timeout is None:
+        timeout = agent_cfg.timeout_for(project.runner.name, project.timeout)
     notes: list[str] = []
     pairs = []
     for c in manifest["candidates"]:
@@ -419,6 +537,6 @@ def verify_candidates_dir(
             pairs.append((c, read_candidate(candidates_dir, c["file"])))
         except ManifestError as exc:
             notes.append(str(exc)[:300])
-    outcomes = run_candidates(runner, repo, mb, head_sha, pairs, env, timeout, setup_command, notes)
+    outcomes = run_candidates(project.runner, repo, mb, head_sha, pairs, env, timeout, None, notes, target=target)
     rounds = 1 + max((c.get("round", 0) for c in manifest["candidates"]), default=0)
     return manifest, build_section(manifest, outcomes, notes, rounds)
