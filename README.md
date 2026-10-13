@@ -179,6 +179,7 @@ jobs:
       llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
       llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
       llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
+      llm-reasoning-effort: ${{ vars.PROOFCHECK_LLM_REASONING_EFFORT }}
       python-version: "3.12"
       install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
       run-for: trusted   # or "everyone" (spends API credits on any fork PR)
@@ -202,7 +203,7 @@ jobs:
       labels: true
 ```
 
-For the agent, add a repository **secret** `PROOFCHECK_LLM_API_KEY` and repository **variables** `PROOFCHECK_LLM_PROVIDER` (`anthropic` or `openai`) and `PROOFCHECK_LLM_MODEL` (optional: `PROOFCHECK_LLM_BASE_URL`); `init --agent` also sets `[agent] enabled = true` in `proofcheck.toml`. The key is only ever passed to the propose job, which never runs PR code. The agent workflow posts its own updated card through the same privileged comment workflow, so the comment workflow only listens for the evidence run.
+For the agent, add a repository **secret** `PROOFCHECK_LLM_API_KEY` and repository **variables** `PROOFCHECK_LLM_PROVIDER` (`anthropic` or `openai`) and `PROOFCHECK_LLM_MODEL` (optional: `PROOFCHECK_LLM_BASE_URL`, and `PROOFCHECK_LLM_REASONING_EFFORT`: OpenAI's GPT-6 Luna and Sol only call tools through Chat Completions with `none`); `init --agent` also sets `[agent] enabled = true` in `proofcheck.toml`. The key is only ever passed to the propose job, which never runs PR code. The agent workflow posts its own updated card through the same privileged comment workflow, so the comment workflow only listens for the evidence run.
 
 On fork PRs the evidence workflow has no write token, so the card also appears in the run's **job summary** even before the comment workflow posts it.
 

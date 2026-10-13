@@ -115,6 +115,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- OpenAI GPT-6 models: new optional `PROOFCHECK_LLM_REASONING_EFFORT` (workflow
+  input `llm-reasoning-effort`) is sent as `reasoning_effort`; GPT-6 Luna and
+  Sol need `none` to call tools through Chat Completions. The claim extractor
+  no longer sends `temperature` when reasoning is on, which those models reject.
 - Test runs dropped `GIT_CONFIG_KEY_n` (it looks like a secret) but kept
   `GIT_CONFIG_COUNT`, so every git command inside the tests under check
   failed. The whole `GIT_CONFIG_*` family is now dropped together.

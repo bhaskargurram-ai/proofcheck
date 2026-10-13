@@ -66,6 +66,10 @@ class WireFormatTest(unittest.TestCase):
         self.assertEqual([m["role"] for m in msgs], ["system", "user", "assistant", "tool", "user"])
         self.assertEqual(json.loads(msgs[2]["tool_calls"][0]["function"]["arguments"]), {"path": "a.py"})
         self.assertEqual(msgs[3]["tool_call_id"], "t1")
+        self.assertNotIn("reasoning_effort", payload)
+        # GPT-6 Luna/Sol call tools in Chat Completions only with reasoning_effort "none"
+        _, _, payload = ToolLLM("openai", "gpt-6-luna", "k", reasoning_effort="none").build_request("S", TURNS, [SPEC])
+        self.assertEqual(payload["reasoning_effort"], "none")
         # a compatible server (custom base URL) gets max_tokens
         _, _, payload = ToolLLM("openai", "m", "k", base_url="https://llm.example/v1").build_request("S", TURNS, [SPEC], "submit_test")
         self.assertIn("max_tokens", payload)
@@ -136,6 +140,13 @@ class ConfigFromEnvTest(unittest.TestCase):
     def test_complete(self):
         c = client_from_env(self.BASE)
         self.assertEqual((c.provider, c.model, c.api_key), ("anthropic", "m", "k"))
+
+    def test_reasoning_effort_from_env(self):
+        env = dict(self.BASE, PROOFCHECK_LLM_PROVIDER="openai", PROOFCHECK_LLM_REASONING_EFFORT="None ")
+        self.assertEqual(client_from_env(env).reasoning_effort, "none")
+        self.assertEqual(client_from_env(dict(env, PROOFCHECK_LLM_PROVIDER="anthropic")).reasoning_effort, "")
+        with self.assertRaisesRegex(LLMConfigError, "PROOFCHECK_LLM_REASONING_EFFORT must be one of"):
+            client_from_env(dict(env, PROOFCHECK_LLM_REASONING_EFFORT="turbo"))
 
     def test_model_is_required_with_a_clear_message(self):
         env = dict(self.BASE)

@@ -394,7 +394,7 @@ base_url = ""
 
 Environment variables: `PROOFCHECK_LLM_PROVIDER` (`anthropic` or `openai`),
 `PROOFCHECK_LLM_MODEL` (required), `PROOFCHECK_LLM_API_KEY`,
-`PROOFCHECK_LLM_BASE_URL` (optional). The key is never read from a file.
+`PROOFCHECK_LLM_BASE_URL` (optional) and `PROOFCHECK_LLM_REASONING_EFFORT` (optional, OpenAI-compatible only; sent as `reasoning_effort`). OpenAI's GPT-6 Luna and GPT-6 Sol support function calling in Chat Completions only with `reasoning_effort` set to `none`, so set it to `none` for those models. The key is never read from a file.
 
 ## Limitations
 

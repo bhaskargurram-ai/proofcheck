@@ -75,6 +75,10 @@ inputs:
     description: "agent-propose: optional API base URL."
     required: false
     default: ""
+  llm-reasoning-effort:
+    description: "agent-propose: optional reasoning_effort for OpenAI-compatible APIs (e.g. none)."
+    required: false
+    default: ""
   llm-api-key:
     description: "agent-propose: API key. Pass a secret; never use it in a job that runs PR code."
     required: false
@@ -214,6 +218,7 @@ runs:
         PROOFCHECK_LLM_PROVIDER: ${{ inputs.llm-provider }}
         PROOFCHECK_LLM_MODEL: ${{ inputs.llm-model }}
         PROOFCHECK_LLM_BASE_URL: ${{ inputs.llm-base-url }}
+        PROOFCHECK_LLM_REASONING_EFFORT: ${{ inputs.llm-reasoning-effort }}
         PROOFCHECK_LLM_API_KEY: ${{ inputs.llm-api-key }}
         PC_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
         PC_HEAD: ${{ inputs.head || github.event.pull_request.head.sha }}

@@ -54,6 +54,12 @@ on:
         description: Optional API base URL.
         type: string
         default: ""
+      llm-reasoning-effort:
+        description: >-
+          Optional, OpenAI-compatible only: sent as reasoning_effort. GPT-6 Luna and
+          GPT-6 Sol need "none" to call tools through Chat Completions.
+        type: string
+        default: ""
       run-for:
         description: >-
           "trusted" (default): only PRs by OWNER/MEMBER/COLLABORATOR, or labelled `proofcheck:agent`.
@@ -252,6 +258,7 @@ jobs:
           PROOFCHECK_LLM_PROVIDER: ${{ inputs.llm-provider }}
           PROOFCHECK_LLM_MODEL: ${{ inputs.llm-model }}
           PROOFCHECK_LLM_BASE_URL: ${{ inputs.llm-base-url }}
+          PROOFCHECK_LLM_REASONING_EFFORT: ${{ inputs.llm-reasoning-effort }}
           PROOFCHECK_LLM_API_KEY: ${{ secrets.llm-api-key }}
           BASE_SHA: ${{ needs.gate.outputs.base-sha }}
           HEAD_SHA: ${{ needs.gate.outputs.head-sha }}

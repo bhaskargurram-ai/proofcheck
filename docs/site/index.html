@@ -437,6 +437,7 @@ jobs:
       llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
       llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
       llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
+      llm-reasoning-effort: ${{ vars.PROOFCHECK_LLM_REASONING_EFFORT }}
       python-version: "3.12"
       install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
       run-for: trusted <span class="c">  # or "everyone" (spends API credits on any fork PR)</span>

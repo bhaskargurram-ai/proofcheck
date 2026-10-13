@@ -255,6 +255,7 @@ class ToolLLM:
     transport: Transport = urllib_transport
     sleep: Callable[[float], None] = time.sleep
     prompt_cache: bool = True
+    reasoning_effort: str = ""  # OpenAI-compatible only; e.g. "none" enables tool calls on GPT-6 Luna in Chat Completions
 
     def __post_init__(self) -> None:
         if self.provider not in PROVIDERS:
@@ -298,6 +299,8 @@ class ToolLLM:
             payload["max_completion_tokens" if default else "max_tokens"] = self.max_output_tokens
             if force_tool:
                 payload["tool_choice"] = {"type": "function", "function": {"name": force_tool}}
+            if self.reasoning_effort:
+                payload["reasoning_effort"] = self.reasoning_effort
         if self.temperature is not None:
             payload["temperature"] = self.temperature
         return url, headers, payload
@@ -361,6 +364,10 @@ def _is_local(url: str) -> bool:
     return url.startswith(("http://localhost", "http://127.0.0.1", "https://localhost", "https://127.0.0.1"))
 
 
+#: Values accepted for PROOFCHECK_LLM_REASONING_EFFORT (sent as ``reasoning_effort`` to OpenAI-compatible APIs).
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
 def client_from_env(env: Mapping[str, str] | None = None, *, provider: str = "", model: str = "", base_url: str = "",
                     timeout: float = 120, max_retries: int = 4, max_output_tokens: int = 4096,
                     temperature: float | None = None, transport: Transport | None = None) -> ToolLLM:
@@ -373,6 +380,9 @@ def client_from_env(env: Mapping[str, str] | None = None, *, provider: str = "",
     model = (e.get("PROOFCHECK_LLM_MODEL") or model or "").strip()
     base_url = (e.get("PROOFCHECK_LLM_BASE_URL") or base_url or "").strip()
     key = e.get("PROOFCHECK_LLM_API_KEY", "")
+    effort = (e.get("PROOFCHECK_LLM_REASONING_EFFORT") or "").strip().lower()
+    if effort and effort not in REASONING_EFFORTS:
+        raise LLMConfigError(f"PROOFCHECK_LLM_REASONING_EFFORT must be one of {', '.join(REASONING_EFFORTS)}, not {effort!r}")
     if not provider:
         raise LLMConfigError("PROOFCHECK_LLM_PROVIDER is not set (use 'anthropic' or 'openai')")
     if provider not in PROVIDERS:
@@ -384,4 +394,6 @@ def client_from_env(env: Mapping[str, str] | None = None, *, provider: str = "",
     kwargs: dict[str, Any] = {}
     if transport is not None:
         kwargs["transport"] = transport
+    if effort and provider == "openai":
+        kwargs["reasoning_effort"] = effort
     return ToolLLM(provider, model, key, base_url, timeout, max_retries, max_output_tokens, temperature, **kwargs)
