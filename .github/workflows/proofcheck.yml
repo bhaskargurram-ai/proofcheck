@@ -1,0 +1,72 @@
+# proofcheck, part 1 of 2: gather evidence (UNPRIVILEGED).
+#
+# Runs on `pull_request`, so for fork PRs GitHub gives this workflow a
+# read-only token and no repository secrets. Untrusted PR code (tests, issue
+# reproducers, benchmarks) only ever runs here. The result is uploaded as an
+# artifact; part 2 (proofcheck-comment.yml) posts it.
+#
+# Dogfooding copy for the proofcheck repository itself: it uses the action
+# from this checkout (`uses: ./`). Other repositories should use
+# examples/workflows/proofcheck.yml.
+#
+# Because `./` resolves to the PR's checkout, a PR can change the action
+# itself. That is acceptable here only because this workflow is unprivileged
+# (read-only token, no secrets); the privileged comment workflow uses the
+# default branch's copy and warns on the card when a PR touches workflows.
+name: proofcheck
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proofcheck-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0              # proofcheck needs the base commit too
+          persist-credentials: false  # do not leave a token in .git/config for PR code to find
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Collect the PR text and referenced issue bodies BEFORE any PR code
+      # runs. This is the only step that receives a token (read-only here).
+      - uses: ./
+        with:
+          command: context
+          github-token: ${{ github.token }}
+
+      # Install the project under test the way your CI normally does.
+      # NOTE: this executes PR-controlled code (setup.py, build hooks).
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install -e ".[dev]"
+
+      - id: proofcheck
+        uses: ./
+        with:
+          command: run
+          fail-on: never   # or "contradicted" to fail the check
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proofcheck-result
+          path: |
+            proofcheck-out/result.json
+            proofcheck-out/card.md
+            proofcheck-out/pr_number
+          if-no-files-found: ignore
+          retention-days: 7

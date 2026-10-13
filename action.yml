@@ -1,0 +1,160 @@
+name: proofcheck
+description: "Evidence, not authorship: check whether a pull request actually does what it claims."
+author: Bhaskar Gurram
+branding:
+  icon: check-square
+  color: green
+
+# Security notes (see docs/SECURITY_MODEL.md):
+# * Every input is passed to shell steps through `env:` and quoted, never
+#   interpolated into the script text with ${{ }} (prevents script injection).
+# * proofcheck is installed into its own virtualenv under $RUNNER_TEMP, so the
+#   project's dependencies (and anything they do at import time) are separate.
+# * `command: context` is the only mode that uses a token for reading; run it
+#   BEFORE installing or executing any PR code.
+# * `command: comment` is meant for the privileged workflow_run workflow. It
+#   never checks out or runs PR code; it validates result.json and re-renders
+#   the card from it.
+
+inputs:
+  command:
+    description: "One of: context, run, comment."
+    required: false
+    default: run
+  base:
+    description: "run: base ref/SHA. Defaults to the pull request's base SHA."
+    required: false
+    default: ""
+  head:
+    description: "run: head ref/SHA. Defaults to the pull request's head SHA."
+    required: false
+    default: ""
+  runner:
+    description: "run: test runner (pytest, unittest, jest). Default: from config, else pytest."
+    required: false
+    default: ""
+  test-command:
+    description: "run: override the test command."
+    required: false
+    default: ""
+  config:
+    description: "run: path to a config file. Default: proofcheck.toml / [tool.proofcheck] read from the BASE commit."
+    required: false
+    default: ""
+  python:
+    description: "run: interpreter used to run tests and issue reproducers (default: `python` on PATH)."
+    required: false
+    default: ""
+  fail-on:
+    description: "run: never | contradicted | no-evidence"
+    required: false
+    default: never
+  output-dir:
+    description: "Directory for context.json, card.md, result.json and pr_number."
+    required: false
+    default: proofcheck-out
+  result:
+    description: "comment: path to result.json (from the downloaded artifact)."
+    required: false
+    default: proofcheck-out/result.json
+  pr-number:
+    description: "comment: pull request number (validated as a positive integer)."
+    required: false
+    default: ""
+  expected-head-sha:
+    description: "comment: only comment if result.json and the PR head match this SHA (use github.event.workflow_run.head_sha)."
+    required: false
+    default: ""
+  github-token:
+    description: "context: token to read issues (contents/issues read). comment: token with pull-requests: write."
+    required: false
+    default: ""
+  proofcheck-version:
+    description: "Advanced: pip requirement to install instead of this action's own source."
+    required: false
+    default: ""
+
+outputs:
+  verdict:
+    description: "run: evidence | partial | no_evidence | contradicted | error"
+    value: ${{ steps.run.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install proofcheck (isolated virtualenv)
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PC_REQUIREMENT: ${{ inputs.proofcheck-version }}
+      run: |
+        set -euo pipefail
+        venv="$RUNNER_TEMP/proofcheck-venv"
+        if [ ! -x "$venv/bin/proofcheck" ]; then
+          python3 -m venv "$venv"
+          "$venv/bin/python" -m pip install --quiet --disable-pip-version-check "${PC_REQUIREMENT:-$ACTION_PATH}"
+        fi
+        echo "PROOFCHECK_BIN=$venv/bin/proofcheck" >> "$GITHUB_ENV"
+
+    - name: Collect PR context (before any PR code runs)
+      if: inputs.command == 'context'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$OUT_DIR"
+        "$PROOFCHECK_BIN" context --out "$OUT_DIR/context.json"
+
+    - name: Run proofcheck (untrusted PR code runs here; no token)
+      id: run
+      if: inputs.command == 'run'
+      shell: bash
+      env:
+        PC_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        PC_HEAD: ${{ inputs.head || github.event.pull_request.head.sha }}
+        PC_RUNNER: ${{ inputs.runner }}
+        PC_TEST_COMMAND: ${{ inputs.test-command }}
+        PC_CONFIG: ${{ inputs.config }}
+        PC_FAIL_ON: ${{ inputs.fail-on }}
+        PROOFCHECK_PYTHON: ${{ inputs.python }}
+        OUT_DIR: ${{ inputs.output-dir }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$OUT_DIR"
+        args=(run --repo . --base "$PC_BASE" --head "$PC_HEAD" --out "$OUT_DIR/card.md" --json "$OUT_DIR/result.json" --fail-on "$PC_FAIL_ON")
+        [ -n "$PC_RUNNER" ] && args+=(--runner "$PC_RUNNER")
+        [ -n "$PC_TEST_COMMAND" ] && args+=(--test-command "$PC_TEST_COMMAND")
+        [ -n "$PC_CONFIG" ] && args+=(--config "$PC_CONFIG")
+        [ -f "$OUT_DIR/context.json" ] && args+=(--context-file "$OUT_DIR/context.json")
+        status=0
+        "$PROOFCHECK_BIN" "${args[@]}" || status=$?
+        if [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then echo "$PR_NUMBER" > "$OUT_DIR/pr_number"; fi
+        if [ -f "$OUT_DIR/result.json" ]; then
+          verdict="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["verdict"])' "$OUT_DIR/result.json")"
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          cat "$OUT_DIR/card.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit "$status"
+
+    - name: Post or update the proof card (never runs PR code)
+      if: inputs.command == 'comment'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PC_RESULT: ${{ inputs.result }}
+        PC_PR: ${{ inputs.pr-number }}
+        PC_HEAD_SHA: ${{ inputs.expected-head-sha }}
+      run: |
+        set -euo pipefail
+        if ! [[ "$PC_PR" =~ ^[0-9]{1,10}$ ]]; then
+          echo "::error::pr-number must be a positive integer"; exit 1
+        fi
+        args=(comment --json "$PC_RESULT" --pr "$PC_PR")
+        if [ -n "$PC_HEAD_SHA" ]; then
+          if ! [[ "$PC_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo "::error::invalid expected-head-sha"; exit 1; fi
+          args+=(--expect-head-sha "$PC_HEAD_SHA")
+        fi
+        "$PROOFCHECK_BIN" "${args[@]}"
