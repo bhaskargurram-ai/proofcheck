@@ -82,7 +82,8 @@ class RenderCardTest(unittest.TestCase):
         doc["notes"] = ["<details open>@team-leads</details>"]
         card = render_card(validate_result(doc))
         self.assertEqual(card.count(CARD_MARKER), 1)
-        self.assertEqual(card.count("<!--"), 1)
+        self.assertEqual(card.count("<!--"), 2)  # the marker + the trailing data block
+        self.assertTrue(card.rstrip("\n").splitlines()[-1].startswith("<!-- proofcheck:data {"))
         for bad in ("<img", "<script", "<details", "@octocat", "@everyone", "@team-leads", "](https://", "![x]"):
             self.assertNotIn(bad, card, bad)
         # every table row of the claims table still has exactly 3 cells
