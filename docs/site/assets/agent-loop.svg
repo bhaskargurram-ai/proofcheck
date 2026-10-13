@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 330" width="1000" height="330" role="img" aria-labelledby="t d">
+  <title id="t">The experimental agent: how a reproduction test is proposed and verified</title>
+  <desc id="d">When a fixes #N claim still has no evidence, the agent reads the issue and diff, localizes the relevant code with read-only tools, writes candidate tests with three different prompt variants, and runs static checks with import repair. The propose job holds the LLM key and never executes code. A separate verify job with no secrets runs each candidate on base and head. Only a test that fails on base and passes on head is kept, which marks the claim verified (agent test). If nothing survives, the card says no evidence and never contradicted. Locally, agent run can feed failures back for up to two refinement rounds.</desc>
+  <style>
+    svg { --bg:#ffffff; --edge:#d1d9e0; --ink:#1f2328; --muted:#59636e; --box:#f6f8fa; --arrow:#818b98;
+          --pass:#1a7f37; --pass-bg:#dafbe1; --warn:#9a6700; --warn-bg:#fff8c5; --violet:#8250df; --violet-bg:#fbefff; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#151b23; --edge:#3d444d; --ink:#f0f6fc; --muted:#9198a1; --box:#1d242d; --arrow:#6e7781;
+            --pass:#3fb950; --pass-bg:#12301c; --warn:#d29922; --warn-bg:#3a2b0c; --violet:#ab7df8; --violet-bg:#2a1e45; }
+    }
+    text { font-family:-apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif; fill:var(--ink); }
+    .mono { font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+    .bg { fill:var(--bg); stroke:var(--edge); }
+    .box { fill:var(--box); stroke:var(--edge); stroke-width:1.2; }
+    .inner { fill:var(--bg); stroke:var(--edge); }
+    .h { font-size:14.5px; font-weight:650; }
+    .li { font-size:12px; fill:var(--muted); }
+    .code { font-size:11.5px; fill:var(--ink); }
+    .okbox { fill:var(--pass-bg); stroke:var(--pass); stroke-width:1.2; }
+    .warnbox { fill:var(--warn-bg); stroke:var(--warn); stroke-width:1.2; }
+    .okh { fill:var(--pass); font-size:14px; font-weight:700; }
+    .warnh { fill:var(--warn); font-size:14px; font-weight:700; }
+    .okl { fill:var(--ink); font-size:12px; }
+    .wire { fill:none; stroke:var(--arrow); stroke-width:1.6; }
+    .loop { fill:none; stroke:var(--violet); stroke-width:1.4; stroke-dasharray:5 4; }
+    .head { fill:var(--arrow); } .vhead { fill:var(--violet); }
+    .pill { fill:var(--bg); stroke:var(--violet); }
+    .pt { font-size:11.5px; fill:var(--violet); font-weight:600; }
+    .brk { fill:none; stroke:var(--muted); stroke-width:1.2; }
+    .bt { font-size:12.5px; fill:var(--ink); }
+    .btm { font-size:12.5px; fill:var(--muted); }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0 0 L10 5 L0 10 z"/>
+    </marker>
+    <marker id="varr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="vhead" d="M0 0 L10 5 L0 10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="999" height="329" rx="14"/>
+
+  <!-- refinement loop (agent run, local only) -->
+  <polyline class="loop" points="733,52 733,28 410,28 410,48" marker-end="url(#varr)"/>
+  <rect class="pill" x="442" y="17" width="258" height="22" rx="11"/>
+  <text class="pt" x="571" y="32" text-anchor="middle">agent run, local only: ≤ 2 refinement rounds</text>
+
+  <!-- 1 input -->
+  <rect class="box" x="22" y="52" width="130" height="210" rx="10"/>
+  <text class="h" x="36" y="78">Issue + diff</text>
+  <text class="li" x="36" y="104">Runs when a</text>
+  <text class="li mono" x="36" y="122">fixes #N</text>
+  <text class="li" x="36" y="140">claim still has</text>
+  <text class="li" x="36" y="158">no evidence</text>
+  <text class="li" x="36" y="188">(or always, if</text>
+  <text class="li" x="36" y="206">configured)</text>
+
+  <path class="wire" d="M152 157 L 168 157" marker-end="url(#arr)"/>
+
+  <!-- 2 localize -->
+  <rect class="box" x="172" y="52" width="130" height="210" rx="10"/>
+  <text class="h" x="186" y="78">Localize</text>
+  <text class="li" x="186" y="98">read-only tools</text>
+  <text class="code mono" x="186" y="124">read_file</text>
+  <text class="code mono" x="186" y="144">grep</text>
+  <text class="code mono" x="186" y="164">get_diff</text>
+  <text class="code mono" x="186" y="184">get_issue</text>
+  <text class="code mono" x="186" y="204">list_tests</text>
+  <text class="li" x="186" y="236">via git; no exec</text>
+
+  <path class="wire" d="M302 157 L 318 157" marker-end="url(#arr)"/>
+
+  <!-- 3 variants -->
+  <rect class="box" x="322" y="52" width="176" height="210" rx="10"/>
+  <text class="h" x="336" y="78">3 prompt variants</text>
+  <rect class="inner" x="332" y="92" width="156" height="30" rx="6"/>
+  <text class="code mono" x="342" y="112" font-size="11">reproduce-issue</text>
+  <rect class="inner" x="332" y="128" width="156" height="30" rx="6"/>
+  <text class="code mono" x="342" y="148" font-size="11">exercise-diff</text>
+  <rect class="inner" x="332" y="164" width="156" height="30" rx="6"/>
+  <text class="code mono" x="342" y="184" font-size="11">mimic-existing-tests</text>
+  <text class="li" x="336" y="220">different prompts, not</text>
+  <text class="li" x="336" y="238">resampling one prompt</text>
+
+  <path class="wire" d="M498 157 L 514 157" marker-end="url(#arr)"/>
+
+  <!-- 4 static checks -->
+  <rect class="box" x="518" y="52" width="130" height="210" rx="10"/>
+  <text class="h" x="532" y="78">Static checks</text>
+  <text class="li mono" x="532" y="104">ast.parse</text>
+  <text class="li" x="532" y="124">≥ 1 test function</text>
+  <text class="li" x="532" y="144">fixed test path</text>
+  <text class="li" x="532" y="164">imports exist</text>
+  <text class="li" x="532" y="194">near-miss module</text>
+  <text class="li" x="532" y="212">names repaired</text>
+
+  <path class="wire" d="M648 157 L 664 157" marker-end="url(#arr)"/>
+
+  <!-- 5 run -->
+  <rect class="box" x="668" y="52" width="130" height="210" rx="10"/>
+  <text class="h" x="682" y="78">Run on base</text>
+  <text class="h" x="682" y="96">and head</text>
+  <text class="li" x="682" y="122">same engine as</text>
+  <text class="li" x="682" y="140">the PR's tests;</text>
+  <text class="li" x="682" y="158">no LLM here</text>
+  <rect class="inner" x="680" y="176" width="106" height="62" rx="6"/>
+  <text class="code mono" x="690" y="200">base: fail</text>
+  <text class="code mono" x="690" y="224">head: pass</text>
+
+  <!-- fork -->
+  <path class="wire" d="M798 157 C 808 157, 806 104, 814 104" marker-end="url(#arr)"/>
+  <path class="wire" d="M798 157 C 808 157, 806 212, 814 212" marker-end="url(#arr)"/>
+
+  <!-- 6 outcomes -->
+  <rect class="okbox" x="818" y="52" width="160" height="104" rx="10"/>
+  <text class="okh" x="832" y="78">fail → pass</text>
+  <text class="okl" x="832" y="102">claim marked</text>
+  <text class="okl" x="832" y="120">verified (agent test);</text>
+  <text class="okl" x="832" y="138">test shown on card</text>
+
+  <rect class="warnbox" x="818" y="166" width="160" height="96" rx="10"/>
+  <text class="warnh" x="832" y="192">anything else</text>
+  <text class="okl" x="832" y="216">no evidence found;</text>
+  <text class="okl" x="832" y="234">never contradicted:</text>
+  <text class="okl" x="832" y="252">the test may be wrong</text>
+
+  <!-- job brackets -->
+  <polyline class="brk" points="22,276 22,284 648,284 648,276"/>
+  <text class="bt" x="335" y="308" text-anchor="middle"><tspan font-weight="650">propose job</tspan><tspan class="btm">: holds the LLM key, never runs code</tspan></text>
+  <polyline class="brk" points="668,276 668,284 978,284 978,276"/>
+  <text class="bt" x="823" y="308" text-anchor="middle"><tspan font-weight="650">verify job</tspan><tspan class="btm">: runs code, no secrets</tspan></text>
+</svg>

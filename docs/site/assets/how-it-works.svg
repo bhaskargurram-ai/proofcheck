@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" role="img" aria-labelledby="t d">
+  <title id="t">How proofcheck works</title>
+  <desc id="d">A pull request has a description, a diff and a linked issue. Claims are parsed from the description. Four evidence sources run against the base and head commits: the PR's changed tests, the issue's reproducer, a diff evidence map that undoes each hunk, and an optional agent-written reproduction test. Each claim is matched to the evidence, and the result is posted as a proof card comment with a label: verified, partial, contradicted or no evidence.</desc>
+  <style>
+    svg { --bg:#ffffff; --edge:#d1d9e0; --ink:#1f2328; --muted:#59636e; --box:#f6f8fa; --arrow:#818b98;
+          --pass:#1a7f37; --pass-bg:#dafbe1; --warn:#9a6700; --warn-bg:#fff8c5; --fail:#cf222e; --fail-bg:#ffebe9;
+          --blue:#0969da; --blue-bg:#ddf4ff; --violet:#8250df; --violet-bg:#fbefff; --grey-bg:#eff2f5; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#151b23; --edge:#3d444d; --ink:#f0f6fc; --muted:#9198a1; --box:#1d242d; --arrow:#6e7781;
+            --pass:#3fb950; --pass-bg:#12301c; --warn:#d29922; --warn-bg:#3a2b0c; --fail:#f85149; --fail-bg:#3c1618;
+            --blue:#4493f8; --blue-bg:#0f2a4a; --violet:#ab7df8; --violet-bg:#2a1e45; --grey-bg:#262c36; }
+    }
+    text { font-family:-apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif; fill:var(--ink); }
+    .mono { font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+    .bg { fill:var(--bg); stroke:var(--edge); }
+    .box { fill:var(--box); stroke:var(--edge); stroke-width:1.2; }
+    .inner { fill:var(--bg); stroke:var(--edge); }
+    .agent { fill:var(--violet-bg); stroke:var(--violet); stroke-width:1.4; stroke-dasharray:5 4; }
+    .h { font-size:15px; font-weight:650; }
+    .h2 { font-size:13.5px; font-weight:600; }
+    .sub { font-size:12.5px; fill:var(--muted); }
+    .small { font-size:11.5px; fill:var(--muted); }
+    .wire { fill:none; stroke:var(--arrow); stroke-width:1.6; }
+    .head { fill:var(--arrow); }
+    .pill { fill:var(--bg); stroke:var(--edge); }
+    .tag { fill:var(--violet); font-size:11.5px; font-weight:600; }
+    .ok { fill:var(--pass); } .warn { fill:var(--warn); } .no { fill:var(--fail); }
+    .glyph { fill:none; stroke:var(--bg); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .c-ok { fill:var(--pass-bg); } .t-ok { fill:var(--pass); }
+    .c-part { fill:var(--blue-bg); } .t-part { fill:var(--blue); }
+    .c-no { fill:var(--fail-bg); } .t-no { fill:var(--fail); }
+    .c-none { fill:var(--warn-bg); } .t-none { fill:var(--warn); }
+    .chip { font-size:12px; font-weight:600; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0 0 L10 5 L0 10 z"/>
+    </marker>
+    <symbol id="i-ok" viewBox="-8 -8 16 16"><circle class="ok" r="7.5"/><polyline class="glyph" points="-3.5,0.2 -1,2.8 3.6,-2.4"/></symbol>
+    <symbol id="i-warn" viewBox="-8 -8 16 16"><path class="warn" d="M0 -7.5 L7.8 6.5 L-7.8 6.5 z" stroke-linejoin="round"/><line class="glyph" x1="0" y1="-2.6" x2="0" y2="1.6"/><circle r="1" fill="var(--bg)" cy="4"/></symbol>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="999" height="399" rx="14"/>
+
+  <!-- claim path: description to matcher, drawn over the top -->
+  <polyline class="wire" points="110,85 110,28 724,28 724,103" marker-end="url(#arr)"/>
+  <rect class="pill" x="298" y="17" width="244" height="22" rx="11"/>
+  <text class="small" x="420" y="32" text-anchor="middle">claims parsed from the description</text>
+
+  <!-- pull request -->
+  <rect class="box" x="20" y="85" width="180" height="260" rx="10"/>
+  <text class="h" x="36" y="112">Pull request</text>
+  <rect class="inner" x="32" y="126" width="156" height="58" rx="7"/>
+  <text class="h2" x="44" y="149">Description</text>
+  <text class="sub" x="44" y="170">“Fixes #12. 2× faster.”</text>
+  <rect class="inner" x="32" y="194" width="156" height="58" rx="7"/>
+  <text class="h2" x="44" y="217">Diff</text>
+  <text class="sub" x="44" y="238">base → head commits</text>
+  <rect class="inner" x="32" y="262" width="156" height="58" rx="7"/>
+  <text class="h2" x="44" y="285">Linked issue #12</text>
+  <text class="sub mono" x="44" y="306">```python repro</text>
+
+  <!-- fan out -->
+  <path class="wire" d="M200 215 C 232 215, 228 86, 256 86" marker-end="url(#arr)"/>
+  <path class="wire" d="M200 215 C 232 215, 228 172, 256 172" marker-end="url(#arr)"/>
+  <path class="wire" d="M200 215 C 232 215, 228 258, 256 258" marker-end="url(#arr)"/>
+  <path class="wire" d="M200 215 C 232 215, 228 344, 256 344" marker-end="url(#arr)"/>
+
+  <!-- evidence sources -->
+  <rect class="box" x="260" y="50" width="320" height="72" rx="10"/>
+  <text class="h" x="278" y="79">Changed tests on base and head</text>
+  <text class="sub" x="278" y="102">Do the PR's tests fail before, pass after?</text>
+
+  <rect class="box" x="260" y="136" width="320" height="72" rx="10"/>
+  <text class="h" x="278" y="165">Issue reproducer replay</text>
+  <text class="sub" x="278" y="188">Does the issue's snippet behave differently?</text>
+
+  <rect class="box" x="260" y="222" width="320" height="72" rx="10"/>
+  <text class="h" x="278" y="251">Diff evidence map</text>
+  <text class="sub" x="278" y="274">Undo each hunk: does the evidence break?</text>
+
+  <rect class="agent" x="260" y="308" width="320" height="72" rx="10"/>
+  <text class="h" x="278" y="337">Agent reproduction test</text>
+  <text class="tag" x="566" y="336" text-anchor="end">opt-in</text>
+  <text class="sub" x="278" y="360">An LLM writes a test; proofcheck runs it</text>
+
+  <!-- fan in -->
+  <path class="wire" d="M580 86 C 612 86, 608 215, 640 215" marker-end="url(#arr)"/>
+  <path class="wire" d="M580 172 C 612 172, 608 215, 640 215"/>
+  <path class="wire" d="M580 258 C 612 258, 608 215, 640 215"/>
+  <path class="wire" d="M580 344 C 612 344, 608 215, 640 215"/>
+
+  <!-- matcher -->
+  <rect class="box" x="644" y="105" width="160" height="220" rx="10"/>
+  <text class="h" x="660" y="130">Claims</text>
+  <text class="small" x="660" y="147">matched to evidence</text>
+  <use href="#i-ok" x="660" y="162" width="16" height="16"/>
+  <text class="mono" font-size="12.5" x="684" y="174">fixes #12</text>
+  <use href="#i-ok" x="660" y="190" width="16" height="16"/>
+  <text class="mono" font-size="12.5" x="684" y="202">adds tests</text>
+  <use href="#i-warn" x="660" y="218" width="16" height="16"/>
+  <text class="mono" font-size="12.5" x="684" y="230">2× faster</text>
+  <use href="#i-warn" x="660" y="246" width="16" height="16"/>
+  <text class="mono" font-size="12.5" x="684" y="258">refactor only</text>
+  <text class="small" x="660" y="302">fixed rules decide;</text>
+  <text class="small" x="660" y="316">an LLM never does</text>
+
+  <path class="wire" d="M804 215 L 844 215" marker-end="url(#arr)"/>
+
+  <!-- card -->
+  <rect class="box" x="848" y="85" width="132" height="260" rx="10"/>
+  <text class="h" x="862" y="112">Proof card</text>
+  <text class="small" x="862" y="131">one PR comment,</text>
+  <text class="small" x="862" y="146">updated in place</text>
+  <text class="small" x="862" y="170">+ one label:</text>
+  <rect class="c-ok" x="860" y="180" width="108" height="24" rx="12"/>
+  <text class="chip t-ok" x="914" y="196" text-anchor="middle">verified</text>
+  <rect class="c-part" x="860" y="209" width="108" height="24" rx="12"/>
+  <text class="chip t-part" x="914" y="225" text-anchor="middle">partial</text>
+  <rect class="c-no" x="860" y="238" width="108" height="24" rx="12"/>
+  <text class="chip t-no" x="914" y="254" text-anchor="middle">contradicted</text>
+  <rect class="c-none" x="860" y="267" width="108" height="24" rx="12"/>
+  <text class="chip t-none" x="914" y="283" text-anchor="middle">no evidence</text>
+  <use href="#i-warn" x="861" y="306" width="13" height="13"/>
+  <text class="small" x="879" y="317">= no evidence,</text>
+  <text class="small" x="879" y="332">not wrong</text>
+</svg>
