@@ -40,6 +40,9 @@ class TestOutcome:
     #: Tail of the failure/error body (traceback). Used to tell assertion
     #: failures from import errors when the message alone is not enough.
     detail: str = ""
+    #: For pseudo-tests that stand for a whole test module/target: why it
+    #: produced no tests ("build" = it does not compile). Empty otherwise.
+    kind: str = ""
 
 
 def test_id_for(classname: str, name: str) -> str:

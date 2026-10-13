@@ -52,9 +52,15 @@ class TestResult:
     head: str  # outcome on head (or "missing")
     touched: bool = True
     message: str = ""
+    #: Why the test produced no result on base, when that is the reason it
+    #: counts as fail->pass: "build" (the test target does not compile on base).
+    base_failure_kind: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self.__dict__)
+        d = dict(self.__dict__)
+        if not d["base_failure_kind"]:
+            del d["base_failure_kind"]  # keep results of runners without it unchanged
+        return d
 
 
 @dataclass
@@ -72,6 +78,8 @@ class TestCheck:
     base_run: dict[str, Any] = field(default_factory=dict)
     head_run: dict[str, Any] = field(default_factory=dict)
     old_tests_on_head: dict[str, Any] = field(default_factory=dict)
+    #: Per-project summaries (multi-project configurations only; see proofcheck.projects).
+    projects: list[dict[str, Any]] = field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         counts = {k: 0 for k in (FAIL_TO_PASS, PASS_TO_PASS, FAIL_ON_HEAD, ERROR_CLS, SKIPPED_CLS)}
@@ -92,6 +100,7 @@ class TestCheck:
             "base_run": dict(self.base_run),
             "head_run": dict(self.head_run),
             "old_tests_on_head": dict(self.old_tests_on_head),
+            **({"projects": [dict(p) for p in self.projects]} if self.projects else {}),
         }
 
 
@@ -187,15 +196,25 @@ def is_collection_error_id(test_id: str) -> bool:
     return "::" not in test_id
 
 
-def _collection_errors(outcomes: Mapping[str, TestOutcome], runner: TestRunner, modules: Sequence[str]) -> set[str]:
-    """Modules whose import/collection failed in a run."""
-    bad = set()
+def _collection_errors(outcomes: Mapping[str, TestOutcome], runner: TestRunner, modules: Sequence[str]) -> dict[str, TestOutcome]:
+    """Modules whose import/collection (or build) failed in a run, with the pseudo-test reporting it."""
+    bad: dict[str, TestOutcome] = {}
     for tid, o in outcomes.items():
         if o.outcome == ERROR and is_collection_error_id(tid):
             for m in modules:
                 if runner.test_belongs_to(tid, m):
-                    bad.add(m)
+                    bad.setdefault(m, o)
     return bad
+
+
+BUILD = "build"
+
+
+def _first_line(text: str) -> str:
+    for line in text.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
 
 
 def _module_of(test_id: str, runner: TestRunner, modules: Sequence[str]) -> str:
@@ -226,19 +245,29 @@ def classify_runs(
                 # are classified (as fail_to_pass) instead.
                 continue
             if head.outcome == ERROR:
+                what = "test target does not compile on head" if head.kind == BUILD else "module failed to import/collect on head"
                 results.append(TestResult(tid, module, FAIL_ON_HEAD, base.outcome if base else "missing", head.outcome,
-                                          True, ("module failed to import/collect on head: " + head.message)[:500]))
+                                          True, (what + ": " + head.message)[:500]))
                 continue
         cls = classify(base, head, module in base_bad)
         touched_set = touched_by_module.get(module)
         touched = True if touched_set is None else _matches_touched(tid, True, touched_set)
         msg = ""
+        kind = ""
+        base_label = base.outcome if base else "missing"
         if cls == FAIL_ON_HEAD and head is not None:
             msg = head.message
         elif cls == FAIL_TO_PASS:
-            msg = base.message if base is not None else "test module failed to import/collect on base"
+            pseudo = base_bad.get(module) if base is None else None
+            if pseudo is not None and pseudo.kind == BUILD:
+                kind, base_label = BUILD, "build error"
+                why = _first_line(pseudo.message)
+                why = why[len("does not compile: "):] if why.startswith("does not compile: ") else why
+                msg = "fails on base because it does not compile there: " + why
+            else:
+                msg = base.message if base is not None else "test module failed to import/collect on base"
         results.append(
-            TestResult(tid, module, cls, base.outcome if base else "missing", head.outcome if head else "missing", touched, msg[:500])
+            TestResult(tid, module, cls, base_label, head.outcome if head else "missing", touched, msg[:500], kind)
         )
     order = {FAIL_ON_HEAD: 0, FAIL_TO_PASS: 1, ERROR_CLS: 2, PASS_TO_PASS: 3, SKIPPED_CLS: 4}
     results.sort(key=lambda r: (not r.touched, order.get(r.classification, 9), r.test_id))
@@ -258,13 +287,18 @@ def overall_status(check: TestCheck) -> str:
 
 
 def touched_tests_for(
-    runner: TestRunner, repo: str | Path, base: str, head: str, changed: Sequence[gitmod.ChangedFile], modules: Sequence[str]
+    runner: TestRunner, repo: str | Path, base: str, head: str, changed: Sequence[gitmod.ChangedFile], modules: Sequence[str],
+    subdir: str = ".",
 ) -> dict[str, set[tuple[str | None, str]] | None]:
-    """Compute which tests in each changed test module were touched by the diff."""
+    """Compute which tests in each changed test module were touched by the diff.
+
+    ``modules`` and the paths in ``changed`` are relative to ``subdir`` (the
+    project directory within the repository).
+    """
     status = {f.path: f.status for f in changed}
     out: dict[str, set[tuple[str | None, str]] | None] = {}
     for m in modules:
-        raw = gitmod.show_file(repo, head, m)
+        raw = gitmod.show_file(repo, head, repo_path(subdir, m))
         if raw is None:
             out[m] = None
             continue
@@ -275,9 +309,30 @@ def touched_tests_for(
             for f in changed:
                 if f.path == m and f.old_path:
                     src = f.old_path
-            diff = gitmod.diff_text(repo, base, head, [src, m] if src != m else [m])
+            paths = [repo_path(subdir, src), repo_path(subdir, m)] if src != m else [repo_path(subdir, m)]
+            diff = gitmod.diff_text(repo, base, head, paths)
             lines = added_lines_from_diff(diff)
         out[m] = runner.touched_tests(m, raw.decode("utf-8", errors="replace"), lines)
+    return out
+
+
+def repo_path(subdir: str, path: str) -> str:
+    """Repository-relative path of ``path`` inside project directory ``subdir``."""
+    return path if subdir in ("", ".") else f"{subdir.rstrip('/')}/{path}"
+
+
+def local_changes(changed: Sequence[gitmod.ChangedFile], subdir: str) -> list[gitmod.ChangedFile]:
+    """The changed files under ``subdir``, with paths made relative to it."""
+    if subdir in ("", "."):
+        return list(changed)
+    prefix = subdir.rstrip("/") + "/"
+    out = []
+    for f in changed:
+        if not f.path.startswith(prefix):
+            continue
+        old = f.old_path[len(prefix):] if f.old_path and f.old_path.startswith(prefix) else None
+        out.append(gitmod.ChangedFile(f.path[len(prefix):], f.status if old or not f.old_path else "A", old,
+                                      f.additions, f.deletions, f.binary))
     return out
 
 
@@ -292,6 +347,7 @@ def run_fail_to_pass(
     env: Mapping[str, str],
     timeout: float,
     check_old_tests: bool = False,
+    subdir: str = ".",
 ) -> TestCheck:
     """Run the fail-to-pass check using already-created base and head worktrees.
 
@@ -299,21 +355,63 @@ def run_fail_to_pass(
     When ``check_old_tests`` is set, the *base* versions of modified test
     modules are additionally run against the head code ("do the old
     expectations still hold?") and restored afterwards.
+
+    ``subdir`` is the project directory within the repository (see
+    :mod:`proofcheck.projects`): only changes under it are considered, tests
+    run with ``cwd = <worktree>/<subdir>``, file classification uses
+    project-relative paths, and the returned ``test_files``,
+    ``test_modules`` and per-test ``file`` are repository-relative.
     """
+    local = local_changes(changed, subdir)
+    check = _run_local(runner, repo, base, head, local, base_wt, head_wt, env, timeout, check_old_tests, subdir)
+    if subdir not in ("", "."):
+        check.test_files = [repo_path(subdir, p) for p in check.test_files]
+        check.test_modules = [repo_path(subdir, p) for p in check.test_modules]
+        for t in check.tests:
+            if t.file:
+                t.file = repo_path(subdir, t.file)
+        old = check.old_tests_on_head
+        if old.get("files"):
+            old["files"] = [repo_path(subdir, p) for p in old["files"]]
+    return check
+
+
+def _run_local(
+    runner: TestRunner,
+    repo: str | Path,
+    base: str,
+    head: str,
+    changed: Sequence[gitmod.ChangedFile],
+    base_wt: Path,
+    head_wt: Path,
+    env: Mapping[str, str],
+    timeout: float,
+    check_old_tests: bool,
+    subdir: str,
+) -> TestCheck:
     files, modules = select_test_files(runner, changed)
-    check = TestCheck(status=STATUS_NO_TESTS, runner=runner.name, test_files=files, test_modules=modules)
-    if not files:
+    units, unit_notes = runner.inline_test_units(repo, base, head, changed, subdir)
+    check = TestCheck(status=STATUS_NO_TESTS, runner=runner.name, test_files=files + [u.path for u in units],
+                      test_modules=modules + [u.path for u in units])
+    check.notes.extend(unit_notes)
+    if not files and not units:
         check.notes.append("The PR does not add or modify any test files.")
         return check
-    if not modules:
+    if not modules and not units:
         check.notes.append("Test-related files changed, but none of them is a runnable test module.")
         return check
 
-    copy_files_from_ref(repo, head, files, base_wt)
-    touched = touched_tests_for(runner, repo, base, head, changed, modules)
+    base_dir = base_wt if subdir in ("", ".") else base_wt / subdir
+    head_dir = head_wt if subdir in ("", ".") else head_wt / subdir
+    copy_files_from_ref(repo, head, [repo_path(subdir, p) for p in files], base_wt)
+    touched = touched_tests_for(runner, repo, base, head, changed, modules, subdir)
+    for u in units:
+        _write_into(base_dir, u.path, u.base_text)
+        touched[u.path] = u.touched
+    modules = modules + [u.path for u in units]
 
-    head_run = runner.run(head_wt, modules, env, timeout)
-    base_run = runner.run(base_wt, modules, env, timeout)
+    head_run = runner.run(head_dir, modules, env, timeout)
+    base_run = runner.run(base_dir, modules, env, timeout)
     check.head_run = _run_summary(head_run)
     check.base_run = _run_summary(base_run)
     if not head_run.ok:
@@ -338,21 +436,37 @@ def run_fail_to_pass(
         check.notes.append("The test runner reported no tests for the changed files.")
 
     if check_old_tests:
-        modified = [f.path for f in changed if f.status == "M" and f.path in modules]
+        inline = {u.path for u in units}
+        modified = [f.path for f in changed if f.status == "M" and f.path in modules and f.path not in inline]
         if modified:
-            check.old_tests_on_head = _run_old_tests_on_head(runner, repo, base, head, modified, head_wt, env, timeout)
+            check.old_tests_on_head = _run_old_tests_on_head(runner, repo, base, head, modified, head_wt, env, timeout, subdir)
     return check
 
 
+def _write_into(root: Path, rel: str, data: bytes) -> None:
+    """Write ``data`` to ``root/rel`` unless ``rel`` escapes ``root``."""
+    base = root.resolve()
+    target = (root / rel).resolve()
+    if base not in target.parents:
+        return
+    if target.is_symlink():
+        target.unlink()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+
+
 def _run_old_tests_on_head(
-    runner: TestRunner, repo: str | Path, base: str, head: str, modified: Sequence[str], head_wt: Path, env: Mapping[str, str], timeout: float
+    runner: TestRunner, repo: str | Path, base: str, head: str, modified: Sequence[str], head_wt: Path, env: Mapping[str, str],
+    timeout: float, subdir: str = ".",
 ) -> dict[str, Any]:
     """Run base versions of modified test modules against head code, then restore them."""
-    copy_files_from_ref(repo, base, modified, head_wt)
+    in_repo = [repo_path(subdir, p) for p in modified]
+    head_dir = head_wt if subdir in ("", ".") else head_wt / subdir
+    copy_files_from_ref(repo, base, in_repo, head_wt)
     try:
-        r = runner.run(head_wt, modified, env, timeout)
+        r = runner.run(head_dir, modified, env, timeout)
     finally:
-        copy_files_from_ref(repo, head, modified, head_wt)
+        copy_files_from_ref(repo, head, in_repo, head_wt)
     if not r.ok:
         return {"ran": False, "error": r.error, "files": list(modified)}
     failing = sorted(t for t, o in r.outcomes.items() if o.outcome in (FAILED, ERROR))

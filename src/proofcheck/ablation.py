@@ -26,7 +26,8 @@ Notes on the mechanics:
   change) is a single hunk whose reversal renames the file back; content
   hunks of a renamed file are applied to the new path;
 * binary files, test files and files matching ``ablation.exclude`` are not
-  ablated;
+  ablated, nor are hunks that lie entirely inside test code of a source file
+  (Rust ``#[cfg(test)]`` modules, reported by the runner's ``test_regions``);
 * one worktree is reused for all hunks: after each run the touched paths are
   restored from the head commit and verified clean.
 """
@@ -214,6 +215,15 @@ def _plain_header(path: str) -> str:
     return f"diff --git {a} {b}\n--- {a}\n+++ {b}\n"
 
 
+def _in_regions(hunk: Hunk, regions: Sequence[tuple[int, int]]) -> bool:
+    """True if every head line of a modify hunk (or the gap of a pure deletion) lies inside one region."""
+    if hunk.kind != "modify":
+        return False
+    first = hunk.new_start
+    last = hunk.new_start + hunk.new_count - 1 if hunk.new_count else hunk.new_start + 1
+    return any(lo <= first and last <= hi for lo, hi in regions)
+
+
 def list_hunks(
     repo: str | Path,
     base: str,
@@ -221,8 +231,15 @@ def list_hunks(
     changed: Sequence[gitmod.ChangedFile],
     is_test_file: Callable[[str], bool],
     exclude: Sequence[str] = (),
+    test_regions: Callable[[str, str], Sequence[tuple[int, int]] | None] | None = None,
+    skipped_test_hunks: list[str] | None = None,
 ) -> list[Hunk]:
-    """All ablatable hunks of the non-test, non-binary changed files, in a stable order."""
+    """All ablatable hunks of the non-test, non-binary changed files, in a stable order.
+
+    ``test_regions(path, head_source)`` returns line ranges of test code inside
+    a source file; hunks entirely inside them are left out (their locations
+    are appended to ``skipped_test_hunks``).
+    """
     out: list[Hunk] = []
     for f in sorted(changed, key=lambda c: c.path):
         if f.binary or is_test_file(f.path) or (f.old_path and is_test_file(f.old_path)):
@@ -254,8 +271,17 @@ def list_hunks(
             out.append(Hunk(f.path, "add" if f.status == "A" else "delete", *nums, patch=head_text + "\n".join(lines) + "\n"))
             continue
         prefix = _plain_header(f.path)
+        regions: Sequence[tuple[int, int]] | None = None
+        if test_regions is not None:
+            data = gitmod.show_file(repo, head, f.path)
+            regions = test_regions(f.path, data.decode("utf-8", "replace")) if data is not None else None
         for nums, lines in hunks:
-            out.append(Hunk(f.path, "modify", *nums, patch=prefix + "\n".join(lines) + "\n"))
+            h = Hunk(f.path, "modify", *nums, patch=prefix + "\n".join(lines) + "\n")
+            if regions and _in_regions(h, regions):
+                if skipped_test_hunks is not None:
+                    skipped_test_hunks.append(h.location())
+                continue
+            out.append(h)
     out.sort(key=lambda h: (h.file, h.new_start, h.old_start))
     return out
 
@@ -383,7 +409,11 @@ def _evaluate(
         left = budget.remaining()
         if left <= 1:
             return [], "time budget exhausted"
-        run = runner.run(wt, list(modules), env, min(test_timeout, left))
+        run_selected = getattr(runner, "run_selected", None)
+        if run_selected is not None:
+            run = run_selected(wt, list(modules), list(test_ids), env, min(test_timeout, left))
+        else:
+            run = runner.run(wt, list(modules), env, min(test_timeout, left))
         if run.timed_out:
             return [], "test run timed out"
         if not run.ok and not run.outcomes:
@@ -497,13 +527,17 @@ def run_ablation(
     if not evidence:
         result.notes.append("No fail→pass test or behaviour-changing issue reproducer to ablate against.")
         return result
+    in_tests: list[str] = []
     try:
-        hunks = list_hunks(repo, base, head, changed, runner.is_test_file, exclude)
+        hunks = list_hunks(repo, base, head, changed, runner.is_test_file, exclude,
+                           test_regions=getattr(runner, "test_regions", None), skipped_test_hunks=in_tests)
     except gitmod.GitError as exc:
         result.status = STATUS_ERROR
         result.notes.append(f"could not list hunks: {exc}")
         return result
     result.total_hunks = len(hunks)
+    if in_tests:
+        result.notes.append(f"{len(in_tests)} hunk(s) inside inline test modules are test code and were not ablated.")
     if not hunks:
         result.status = STATUS_NO_HUNKS
         result.notes.append("No non-test text changes to ablate.")
