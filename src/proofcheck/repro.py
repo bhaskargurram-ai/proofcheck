@@ -147,7 +147,11 @@ def run_snippet(code: str, workdir: Path, python: str, timeout: float, environ: 
     try:
         script = tmp / "snippet.py"
         script.write_text(code, encoding="utf-8")
-        env = scrub_env(environ, extra={"PYTHONPATH": _pythonpath_for(workdir), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": "0"})
+        env = scrub_env(environ)
+        pythonpath = _pythonpath_for(workdir)
+        if env.get("PYTHONPATH"):
+            pythonpath += os.pathsep + env["PYTHONPATH"]
+        env.update({"PYTHONPATH": pythonpath, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": "0"})
         res = run_command([python, "-B", str(script)], cwd=tmp, env=env, timeout=timeout)
         return SnippetRun(
             res.returncode,

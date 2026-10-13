@@ -1,5 +1,6 @@
 """End-to-end tests of the fail-to-pass check with real git worktrees."""
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -173,6 +174,22 @@ class RunnerConfigTest(unittest.TestCase):
     def test_unknown_runner(self):
         with self.assertRaises(ValueError):
             get_runner("nose")
+
+    def test_pythonpath_is_prepended_not_replaced(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            wt = Path(d)
+            (wt / "src").mkdir()
+            script = wt / "write_path.py"
+            script.write_text("import os, sys\nopen(sys.argv[2], 'w').write(os.environ['PYTHONPATH'])\n"
+                              "open(sys.argv[1], 'w').write('<testsuite/>')\n", encoding="utf-8")
+            out = wt / "pp.txt"
+            r = PytestRunner(command=[sys.executable, str(script), "{junitxml}", str(out)])
+            res = r.run(wt, [], {"PYTHONPATH": "/user/extra", "PATH": "/usr/bin:/bin"}, 30)
+            self.assertIsNone(res.error)
+            parts = out.read_text().split(os.pathsep)
+            self.assertEqual(parts, [str(wt / "src"), str(wt), "/user/extra"])
 
     def test_placeholders(self):
         r = PytestRunner(command=["python", "-m", "pytest", "--junit-xml={junitxml}", "{tests}", "-x"])

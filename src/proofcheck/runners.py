@@ -150,7 +150,11 @@ class TestRunner:
             cmd = self.build_command(list(test_files), junit_path)
             full_env = dict(env)
             full_env.update(self.extra_env)
-            full_env.update(self.env_for(workdir, junit_path))
+            for key, value in self.env_for(workdir, junit_path).items():
+                if key == "PYTHONPATH" and full_env.get(key):
+                    # Worktree first, then any user-configured entries.
+                    value = value + os.pathsep + full_env[key]
+                full_env[key] = value
             res: CommandResult = run_command(cmd, cwd=workdir, env=full_env, timeout=timeout)
             out = RunResult(
                 command=cmd,
