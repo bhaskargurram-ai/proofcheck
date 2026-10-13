@@ -171,12 +171,13 @@ against a determined attacker**, and it does not replace review. Treat ✅ as
 
 | Workflow | Permissions | Runs PR code? |
 |---|---|---|
-| `proofcheck.yml` (`pull_request`) | `contents: read` | yes |
+| `proofcheck.yml` (`pull_request`) | `contents: read`, `issues: read` | yes |
 | `proofcheck-comment.yml` (`workflow_run`) | `contents: read`, `pull-requests: write`, `actions: read` | **never** |
 
-- If you run the unprivileged workflow on a private repository where the
-  token can read issues, the `context` step reads them. On public
-  repositories it falls back to anonymous reads.
+- `issues: read` lets the `context` step read linked issues on private
+  repositories; it is read-only and is used before any PR code runs. On public
+  repositories issues are public anyway, and the step falls back to anonymous
+  reads if the permission is removed.
 - Do not add secrets to `proofcheck.yml`. If you enable the LLM extractor,
   run extraction in a workflow that does not execute PR code, or accept that
   PR code in the same job could read the key.

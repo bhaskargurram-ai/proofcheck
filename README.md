@@ -122,6 +122,7 @@ on:
 
 permissions:
   contents: read
+  issues: read   # lets the `context` step read linked issues on private repos (read-only)
 
 concurrency:
   group: proofcheck-${{ github.event.pull_request.number }}
