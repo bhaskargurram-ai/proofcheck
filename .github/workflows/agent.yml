@@ -68,6 +68,12 @@ on:
         description: Label that opts a PR in when run-for is "trusted".
         type: string
         default: "proofcheck:agent"
+      timeout-minutes:
+        description: >-
+          Timeout of the verify job, which builds and runs every candidate on base and head without a cache.
+          Rust candidates compile the crate and its dependencies for both commits; use 60-120 for large workspaces.
+        type: number
+        default: 60
     secrets:
       llm-api-key:
         description: API key for the LLM provider. Only the propose job sees it.
@@ -267,7 +273,7 @@ jobs:
     needs: [gate, propose]
     if: needs.gate.outputs.run == 'true' && needs.propose.outputs.has-candidates == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     # No secrets are referenced in this job, the token is read-only, and no
     # caches are used (a poisoned cache could leak into trusted jobs).
     permissions:
