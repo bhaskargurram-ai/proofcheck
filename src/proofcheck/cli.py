@@ -101,6 +101,8 @@ def main() -> None:
                    "so no token is present while PR code runs.")
 @click.option("--llm/--no-llm", "use_llm", default=None, help="Use the optional LLM claim extractor (needs PROOFCHECK_LLM_* env).")
 @click.option("--skip-tests", is_flag=True, help="Skip the fail-to-pass test run.")
+@click.option("--ablation/--no-ablation", "ablation", default=None,
+              help="Build the diff evidence map (revert each changed hunk and re-run the evidence). Default: from config (on).")
 @click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None, help="Write the Markdown card here.")
 @click.option("--json", "json_path", type=click.Path(dir_okay=False), default=None, help="Write the JSON result here.")
 @click.option("--fail-on", type=click.Choice(["never", "contradicted", "no-evidence"]), default="never", show_default=True,
@@ -108,7 +110,7 @@ def main() -> None:
 def run_cmd(repo: str, base: str, head: str, title: str | None, pr_body_file: str | None, issue_body_file: tuple[str, ...],
             config_path: str | None, runner: str | None, test_command: str | None, event_path: str | None,
             context_file: str | None, fetch_issues: bool, use_llm: bool | None, skip_tests: bool, out_path: str | None, json_path: str | None,
-            fail_on: str) -> None:
+            fail_on: str, ablation: bool | None = None) -> None:
     """Gather evidence for a pull request and write the proof card."""
     import shlex
 
@@ -125,6 +127,8 @@ def run_cmd(repo: str, base: str, head: str, title: str | None, pr_body_file: st
         cfg.runner = runner
     if test_command:
         cfg.test_command = shlex.split(test_command)
+    if ablation is not None:
+        cfg.ablation.enabled = ablation
 
     in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
     if context_file:

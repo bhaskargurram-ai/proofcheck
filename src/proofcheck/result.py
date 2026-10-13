@@ -25,7 +25,10 @@ TEST_STATUSES = ("evidence", "no_evidence", "fail_on_head", "no_tests", "error",
 TEST_CLASSES = ("fail_to_pass", "pass_to_pass", "fail_on_head", "error", "skipped")
 REPRO_STATUSES = ("reproduced_change", "unchanged", "no_snippets", "error", "not_found")
 SNIPPET_STATUSES = ("behavior_changed", "unchanged", "error")
-FLAG_KINDS = ("workflow", "dependency", "binary", "large_diff", "unmentioned")
+FLAG_KINDS = ("workflow", "dependency", "binary", "large_diff", "unmentioned", "unexercised")
+ABLATION_STATUSES = ("ran", "not_applicable", "no_hunks", "baseline_failed", "error")
+HUNK_STATUSES = ("required", "not_exercised", "skipped")
+HUNK_KINDS = ("modify", "add", "delete", "rename")
 
 MAX_STR = 2000
 MAX_ITEMS = 200
@@ -277,6 +280,46 @@ def _scope(v: Any, path: str) -> dict[str, Any] | None:
     }
 
 
+def _hunk(v: Any, path: str) -> dict[str, Any]:
+    d = _dict(v, path)
+    return {
+        "file": _str(d.get("file"), f"{path}.file", 500),
+        "old_path": _str(d.get("old_path"), f"{path}.old_path", 500, optional=True),
+        "kind": _enum(d.get("kind", "modify"), HUNK_KINDS, f"{path}.kind"),
+        "location": _str(d.get("location", ""), f"{path}.location", 1100),
+        "start": _int(d.get("start", 0), f"{path}.start", minimum=0),
+        "end": _int(d.get("end", 0), f"{path}.end", minimum=0),
+        "added": _int(d.get("added", 0), f"{path}.added", minimum=0),
+        "removed": _int(d.get("removed", 0), f"{path}.removed", minimum=0),
+        "status": _enum(d.get("status"), HUNK_STATUSES, f"{path}.status"),
+        "broken_by": _list(d.get("broken_by"), f"{path}.broken_by", lambda x, p: _str(x, p, 500), 10),
+        "reason": _str(d.get("reason", ""), f"{path}.reason", 500),
+        "duration": _num(d.get("duration", 0), f"{path}.duration"),
+    }
+
+
+def _ablation(v: Any, path: str) -> dict[str, Any] | None:
+    d = _dict(v, path, optional=True)
+    if d is None:
+        return None
+    count = lambda k: _int(d.get(k, 0), f"{path}.{k}", minimum=0)  # noqa: E731
+    return {
+        "status": _enum(d.get("status"), ABLATION_STATUSES, f"{path}.status"),
+        "evidence": _list(d.get("evidence"), f"{path}.evidence", lambda x, p: _str(x, p, 500), 60),
+        "hunks": _list(d.get("hunks"), f"{path}.hunks", _hunk, 100),
+        "total_hunks": count("total_hunks"),
+        "tested": count("tested"),
+        "required": count("required"),
+        "not_exercised": count("not_exercised"),
+        "skipped": count("skipped"),
+        "untested_over_cap": count("untested_over_cap"),
+        "budget_s": _num(d.get("budget_s", 0), f"{path}.budget_s"),
+        "elapsed_s": _num(d.get("elapsed_s", 0), f"{path}.elapsed_s"),
+        "budget_exhausted": _bool(d.get("budget_exhausted", False), f"{path}.budget_exhausted"),
+        "notes": _list(d.get("notes"), f"{path}.notes", lambda x, p: _str(x, p, 500), 10),
+    }
+
+
 def validate_result(data: Any) -> dict[str, Any]:
     """Validate a result document and return a sanitized copy.
 
@@ -307,6 +350,7 @@ def validate_result(data: Any) -> dict[str, Any]:
         "scope": _scope(d.get("scope"), "$.scope"),
         "notes": _list(d.get("notes"), "$.notes", lambda x, p: _str(x, p, 1000), 20),
         "config_source": _str(d.get("config_source", ""), "$.config_source", 200),
+        "ablation": _ablation(d.get("ablation"), "$.ablation"),
     }
 
 

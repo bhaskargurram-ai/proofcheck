@@ -115,6 +115,9 @@ def _summary_line(result: dict[str, Any]) -> str:
             parts.append("test run failed")
         else:
             parts.append(f"{c.get('fail_to_pass', 0)} fail→pass, {c.get('pass_to_pass', 0)} pass→pass, {c.get('fail_on_head', 0)} failing on head")
+    ablation_line = _ablation_summary(result)
+    if ablation_line:
+        parts.append(ablation_line)
     scope = result.get("scope")
     if scope:
         flags = len(scope.get("flags") or [])
@@ -247,6 +250,55 @@ def _scope_section(result: dict[str, Any]) -> list[str]:
     return out
 
 
+HUNK_ICONS = {"required": "✅", "not_exercised": "⚠️", "skipped": "⏭️"}
+HUNK_LABELS = {"required": "required", "not_exercised": "not exercised", "skipped": "skipped"}
+MAX_HUNK_ROWS = 25
+
+
+def _ablation_summary(result: dict[str, Any]) -> str:
+    from .ablation import summary_text
+
+    return summary_text(result.get("ablation") or {})
+
+
+def _ablation_section(result: dict[str, Any]) -> list[str]:
+    """The "Diff evidence map" section (hunk ablation)."""
+    a = result.get("ablation")
+    if not a or a.get("status") in ("not_applicable", "no_hunks"):
+        return []
+    out = ["### Diff evidence map", ""]
+    if a["status"] == "baseline_failed":
+        out += ["❔ The evidence did not reproduce in a fresh head worktree, so the hunks were not ablated.", ""]
+    elif a["status"] == "error":
+        out += ["❔ The diff evidence map could not be completed; see notes.", ""]
+    else:
+        out += ["Each changed hunk was reverted on its own and the fail→pass tests / changed reproducers were re-run. "
+                "✅ *required*: reverting it breaks the evidence. ⚠️ *not exercised*: nothing that was measured depends on it.", ""]
+    rows = a.get("hunks") or []
+    if rows:
+        out += ["| Hunk | Status | Evidence that broke |", "|---|---|---|"]
+        for h in rows[:MAX_HUNK_ROWS]:
+            icon = HUNK_ICONS.get(h["status"], "❔")
+            label = HUNK_LABELS.get(h["status"], h["status"])
+            if h["status"] == "required":
+                broke = ", ".join(code(b, 80) for b in h.get("broken_by", [])[:3])
+                extra = len(h.get("broken_by", [])) - 3
+                detail = broke + (f" and {extra} more" if extra > 0 else "")
+            elif h["status"] == "skipped":
+                detail = escape_md(h.get("reason", ""), 160)
+            else:
+                detail = "—"
+            out.append(f"| {code(h.get('location') or h['file'], 120)} | {icon} {label} | {detail} |")
+        if len(rows) > MAX_HUNK_ROWS:
+            out.append(f"| _…and {len(rows) - MAX_HUNK_ROWS} more (see result.json)_ | | |")
+    notes = list(a.get("notes") or [])
+    if notes:
+        out.append("")
+        out += [f"- {escape_md(n, 300)}" for n in notes[:5]]
+    out.append("")
+    return out
+
+
 def harness_warning(paths: list[str]) -> str:
     """Warning shown when the PR modifies the CI workflow or test harness that produced the card."""
     shown = ", ".join(code(p, 80) for p in paths[:6]) + (f" and {len(paths) - 6} more" if len(paths) > 6 else "")
@@ -269,6 +321,7 @@ def render_card(result: dict[str, Any], trusted_warnings: list[str] | None = Non
     lines += _claims_section(result)
     lines += _tests_section(result)
     lines += _repro_section(result)
+    lines += _ablation_section(result)
     lines += _bench_section(result)
     lines += _scope_section(result)
     for n in (result.get("notes") or [])[:5]:

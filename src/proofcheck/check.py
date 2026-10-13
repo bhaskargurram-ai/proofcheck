@@ -104,6 +104,19 @@ def run_check(
             repros.append(IssueRepro(f"#{num}", "not_found", note="Issue text was not available to proofcheck."))
 
     assessments = assess_claims(claims, tests if tests and tests.status != STATUS_SKIPPED else None, repros, bench)
+    ablation = None
+    if cfg.ablation.enabled and not skip_tests:
+        from .ablation import ablation_scope_flag, run_ablation
+
+        ablation = run_ablation(
+            repo, mb, head_sha, changed, runner, tests, repros, ctx.issues, env, environ=environ,
+            max_hunks=cfg.ablation.max_hunks, time_budget_s=cfg.ablation.time_budget_s, test_timeout=cfg.timeout,
+            repro_timeout=cfg.repro_timeout, python=cfg.repro_python, exclude=cfg.ablation.exclude,
+            setup=lambda wt: _setup(cfg, wt, env),
+        )
+        flag = ablation_scope_flag(ablation)
+        if flag is not None:
+            scope.flags.append(flag)
     return new_result(
         repo=ctx.repo,
         pr_number=ctx.number,
@@ -118,6 +131,7 @@ def run_check(
         scope=scope.to_dict(),
         notes=notes,
         config_source=cfg.source,
+        ablation=ablation.to_dict() if ablation is not None else None,
     )
 
 
