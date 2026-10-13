@@ -122,6 +122,7 @@ on:
 
 permissions:
   contents: read
+  issues: read   # lets the `context` step read linked issues on private repos (read-only)
 
 concurrency:
   group: proofcheck-${{ github.event.pull_request.number }}
@@ -198,6 +199,7 @@ on:
     types: [completed]
 
 permissions:
+  contents: read        # check out this repo's own (trusted) default branch; required on private repos
   pull-requests: write
   actions: read
 

@@ -20,6 +20,7 @@ on:
     types: [completed]
 
 permissions:
+  contents: read        # check out this repo's own (trusted) default branch; required on private repos
   pull-requests: write
   actions: read
 
