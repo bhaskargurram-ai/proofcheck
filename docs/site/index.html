@@ -367,61 +367,100 @@ pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v0.2.0"</code></
           <details>
             <summary><code>.github/workflows/proofcheck.yml</code>: gather evidence</summary>
 <pre><code>name: proofcheck
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+
 permissions:
   contents: read
-  issues: read
+  issues: read <span class="c">  # read linked issues on private repositories (read-only)</span>
+
+concurrency:
+  group: proofcheck-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   evidence:
     uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v0.2.0
     with:
+      proofcheck-ref: v0.2.0
       python-version: "3.12"
-      install-command: pip install -e ".[dev]"</code></pre>
+      install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
+      fail-on: never <span class="c">  # or "contradicted" / "no-evidence" to fail the check</span></code></pre>
           </details>
           <details>
             <summary><code>.github/workflows/proofcheck-comment.yml</code>: post the card</summary>
 <pre><code>name: proofcheck comment
+
 on:
   workflow_run:
-    workflows: ["proofcheck", "proofcheck agent"]
+    workflows: ["proofcheck"] <span class="c">  # must match the `name:` of proofcheck.yml</span>
     types: [completed]
-permissions:
-  contents: read
-  actions: read
-  pull-requests: write
-  issues: write
+
+permissions: {}
+
 jobs:
   comment:
+    if: github.event.workflow_run.event == 'pull_request' &amp;&amp; github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      contents: read
+      actions: read        <span class="c">  # download the artifact of the triggering run</span>
+      pull-requests: write <span class="c">  # upsert the comment and the verdict label</span>
     uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
     with:
+      proofcheck-ref: v0.2.0
       labels: true</code></pre>
           </details>
           <details>
             <summary><code>.github/workflows/proofcheck-agent.yml</code>: optional agent</summary>
 <pre><code>name: proofcheck agent
+
 on:
   workflow_run:
-    workflows: ["proofcheck"]
+    workflows: ["proofcheck"] <span class="c">  # must match the `name:` of proofcheck.yml</span>
     types: [completed]
-permissions:
-  contents: read
-  actions: read
-  pull-requests: read
+
+permissions: {}
+
 jobs:
   agent:
+    if: github.event.workflow_run.event == 'pull_request' &amp;&amp; github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: read
     uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v0.2.0
     with:
-      llm-provider: anthropic   <span class="c"># or openai</span>
+      proofcheck-ref: v0.2.0
+      llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
       llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
+      llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
+      python-version: "3.12"
+      install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
+      run-for: trusted <span class="c">  # or "everyone" (spends API credits on any fork PR)</span>
     secrets:
-      llm-api-key: ${{ secrets.PROOFCHECK_LLM_API_KEY }}</code></pre>
+      llm-api-key: ${{ secrets.PROOFCHECK_LLM_API_KEY }}
+
+  comment:
+    needs: agent
+    if: needs.agent.outputs.verified == 'true'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    with:
+      proofcheck-ref: v0.2.0
+      pr-number: ${{ needs.agent.outputs.pr-number }}
+      artifact-run-id: ${{ github.run_id }}
+      labels: true</code></pre>
           </details>
         </li>
         <li>
           <h3>Open a pull request</h3>
-          <p>The card appears in the run's job summary right away, and as a PR comment with a label once the comment workflow runs. For the agent, add a <code>PROOFCHECK_LLM_API_KEY</code> secret and a <code>PROOFCHECK_LLM_MODEL</code> variable first.</p>
+          <p>The card appears in the run's job summary right away, and as a PR comment with a label once the comment workflow runs. For the agent, add a <code>PROOFCHECK_LLM_API_KEY</code> secret and <code>PROOFCHECK_LLM_PROVIDER</code> and <code>PROOFCHECK_LLM_MODEL</code> variables first.</p>
         </li>
       </ol>
     </div>

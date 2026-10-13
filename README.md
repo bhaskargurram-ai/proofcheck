@@ -104,38 +104,52 @@ proofcheck runs as separate workflows so that untrusted PR code and privileged t
 
 ```yaml
 name: proofcheck
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+
 permissions:
   contents: read
-  issues: read
+  issues: read   # read linked issues on private repositories (read-only)
+
+concurrency:
+  group: proofcheck-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   evidence:
     uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v0.2.0
     with:
+      proofcheck-ref: v0.2.0
       python-version: "3.12"
-      install-command: pip install -e ".[dev]"   # how your CI installs the project
-      fail-on: never                             # or "contradicted"
+      # Installs the project under test; this runs PR code (unprivileged job).
+      install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
+      fail-on: never   # or "contradicted" / "no-evidence" to fail the check
 ```
 
 **`.github/workflows/proofcheck-comment.yml`** posts the card and the label. It is privileged and never runs PR code.
 
 ```yaml
 name: proofcheck comment
+
 on:
   workflow_run:
-    workflows: ["proofcheck", "proofcheck agent"]
+    workflows: ["proofcheck"]   # must match the `name:` of proofcheck.yml
     types: [completed]
-permissions:
-  contents: read
-  actions: read
-  pull-requests: write
-  issues: write          # create and apply the proofcheck: labels
+
+permissions: {}
+
 jobs:
   comment:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      contents: read
+      actions: read          # download the artifact of the triggering run
+      pull-requests: write   # upsert the comment and the verdict label
     uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
     with:
+      proofcheck-ref: v0.2.0
       labels: true
 ```
 
@@ -143,25 +157,52 @@ jobs:
 
 ```yaml
 name: proofcheck agent
+
 on:
   workflow_run:
-    workflows: ["proofcheck"]
+    workflows: ["proofcheck"]   # must match the `name:` of proofcheck.yml
     types: [completed]
-permissions:
-  contents: read
-  actions: read
-  pull-requests: read
+
+permissions: {}
+
 jobs:
   agent:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: read
     uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v0.2.0
     with:
-      llm-provider: anthropic                       # or openai (any OpenAI-compatible endpoint)
-      llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}   # required; there is no default model
+      proofcheck-ref: v0.2.0
+      llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
+      llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
+      llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
+      python-version: "3.12"
+      install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
+      run-for: trusted   # or "everyone" (spends API credits on any fork PR)
     secrets:
       llm-api-key: ${{ secrets.PROOFCHECK_LLM_API_KEY }}
+
+  comment:
+    needs: agent
+    if: needs.agent.outputs.verified == 'true'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v0.2.0
+    with:
+      proofcheck-ref: v0.2.0
+      # Trusted values: the PR number comes from the gate job (API data, no PR
+      # code ran there) and the artifact from this run's verify job.
+      pr-number: ${{ needs.agent.outputs.pr-number }}
+      artifact-run-id: ${{ github.run_id }}
+      labels: true
 ```
 
-For the agent, add a repository **secret** `PROOFCHECK_LLM_API_KEY` and a repository **variable** `PROOFCHECK_LLM_MODEL`. The key is only ever passed to the propose job, which never runs PR code.
+For the agent, add a repository **secret** `PROOFCHECK_LLM_API_KEY` and repository **variables** `PROOFCHECK_LLM_PROVIDER` (`anthropic` or `openai`) and `PROOFCHECK_LLM_MODEL` (optional: `PROOFCHECK_LLM_BASE_URL`); `init --agent` also sets `[agent] enabled = true` in `proofcheck.toml`. The key is only ever passed to the propose job, which never runs PR code. The agent workflow posts its own updated card through the same privileged comment workflow, so the comment workflow only listens for the evidence run.
 
 On fork PRs the evidence workflow has no write token, so the card also appears in the run's **job summary** even before the comment workflow posts it.
 
@@ -427,6 +468,7 @@ python = "python"                      # interpreter for issue snippets
 enabled = true
 max_hunks = 12
 time_budget_s = 300
+exclude = ["*.md", "*.rst", "*.txt", "docs/*", "LICENSE*", "CHANGELOG*", ".github/*"]
 
 [agent]                                # experimental reproduction-test agent
 enabled = false
@@ -435,6 +477,15 @@ variants = 3                           # 4 adds "localize-first"
 max_rounds = 2                         # refinement rounds, `agent run` only
 max_tool_calls = 25                    # per variant
 test_dir = "tests/proofcheck_agent"
+test_timeout = 120                     # seconds per candidate and commit
+max_output_tokens = 4096               # per model response
+max_total_tokens = 1500000             # input + output over the whole run
+max_cost_usd = 0                       # 0 = no cap; enforced only when prices are set
+# price_input_per_mtok = 0.0           # USD per million tokens, to report cost
+# price_output_per_mtok = 0.0
+# temperature = 0.0                    # omitted from requests unless set
+request_timeout = 120
+max_retries = 4
 
 [llm]                                  # optional LLM claim extraction
 enabled = false                        # the API key is never read from this file
@@ -481,6 +532,7 @@ proofcheck agent run     (propose + verify + refinement; local or trusted use on
 | `comment` | Validates `result.json`, re-renders the card and creates or updates the PR comment. |
 | `agent propose` | LLM with read-only tools writes candidate tests. Never executes code. |
 | `agent verify` | Runs the candidates on base and head and merges the result. No LLM. |
+| `agent needed` | Prints `true` when a `fixes` claim still lacks evidence (used by the agent workflow's gate). |
 | `agent run` | Both, with refinement rounds. Runs untrusted code next to the API key, so use it only locally or in trusted contexts. |
 
 <details>
@@ -532,7 +584,7 @@ That proofcheck found nothing that confirms or refutes the claim. It is not an a
 <details>
 <summary><b>Do I need an LLM?</b></summary>
 
-No. Claim extraction, the test runs, issue replay and the diff evidence map are all deterministic. An LLM is only used if you enable the optional claim extractor or the experimental agent, and neither can turn a claim into ❌.
+No. Claim extraction, the test runs, issue replay and the diff evidence map are all deterministic. An LLM is only used if you enable the optional claim extractor or the experimental agent. Neither one decides a verdict: the extractor can only propose claims, which are then checked against what proofcheck ran, and agent evidence can upgrade a claim to ✅ but never mark one ❌.
 
 </details>
 
