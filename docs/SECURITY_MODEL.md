@@ -51,8 +51,15 @@ Rules that hold in every zone:
   zone rules below on every test run.
 - **No credentials on disk.** Every `actions/checkout` sets
   `persist-credentials: false`.
-- **No caches** in jobs that run PR code (a poisoned cache could leak into a
-  trusted job that restores it).
+- **No caches** in privileged jobs or in `workflow_run` jobs (a poisoned
+  cache could leak into a trusted job that restores it). The one exception is
+  `Swatinem/rust-cache` in the unprivileged `pull_request` evidence job, for
+  Rust projects: GitHub scopes caches saved by a `pull_request` run to that
+  pull request's merge ref, so a PR can only poison its own later evidence
+  runs (whose results are untrusted anyway), never the default branch or the
+  comment and agent workflows, which restore no cache. The Rust toolchain
+  named by the PR's `rust-toolchain.toml` is installed only after the token
+  step, like the project's own install command.
 
 ### The agent (experimental, opt-in)
 

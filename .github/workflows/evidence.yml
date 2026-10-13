@@ -33,7 +33,7 @@ on:
         type: string
         default: ""
       install-command:
-        description: Shell command that installs the project under test (runs PR code).
+        description: Shell command that installs the project under test (runs PR code). May be empty (e.g. Rust-only repositories).
         type: string
         default: 'pip install -e ".[dev]" || pip install -e .'
       proofcheck-ref:
@@ -53,9 +53,11 @@ on:
         type: boolean
         default: true
       timeout-minutes:
-        description: Job timeout.
+        description: >-
+          Job timeout. Rust workspaces compile the changed crates for the base, head and every ablated hunk;
+          use 60-120 for large workspaces.
         type: number
-        default: 30
+        default: 60
     outputs:
       verdict:
         description: "evidence | partial | no_evidence | contradicted | error"
@@ -115,6 +117,32 @@ jobs:
           set -euo pipefail
           mkdir -p proofcheck-out
           "$PROOFCHECK_BIN" context --out proofcheck-out/context.json
+
+      # Rust projects. rustup is preinstalled on ubuntu-latest; installing the
+      # toolchain that the PR's rust-toolchain.toml names is PR-controlled
+      # configuration, so this runs after the token step, like the install step.
+      - name: Set up Rust (honours rust-toolchain.toml; runs PR-controlled config)
+        if: hashFiles('**/Cargo.toml') != ''
+        run: |
+          set -euo pipefail
+          if [ -f rust-toolchain.toml ] || [ -f rust-toolchain ]; then
+            rustup toolchain install || rustup show active-toolchain
+          else
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustc --version
+          cargo --version
+          # One target directory for the base, head and ablation worktrees.
+          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
+          echo "CARGO_TERM_COLOR=never" >> "$GITHUB_ENV"
+
+      # Restores ~/.cargo and ./target. Only in this unprivileged pull_request
+      # job: its caches are scoped to the PR's ref, and no workflow_run job
+      # (comment, agent) ever restores a cache.
+      - name: Cache Rust dependencies (unprivileged pull_request job only)
+        if: hashFiles('**/Cargo.toml') != ''
+        uses: Swatinem/rust-cache@v2
 
       - name: Install the project under test (runs PR code)
         env:
