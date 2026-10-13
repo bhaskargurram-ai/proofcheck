@@ -134,6 +134,21 @@ def _claim(v: Any, path: str) -> dict[str, Any]:
     }
 
 
+def _claim_with_source(v: Any, path: str) -> dict[str, Any]:
+    """A claim, plus the optional ``verified_by`` marker set when agent evidence verified it."""
+    out = _claim(v, path)
+    if isinstance(v, dict) and v.get("verified_by") is not None:
+        out["verified_by"] = _enum(v.get("verified_by"), ("agent",), f"{path}.verified_by")
+    return out
+
+
+def _agent(v: Any, path: str) -> dict[str, Any] | None:
+    """The optional ``agent`` section (agent-written reproduction tests)."""
+    from .agent.schema import validate_agent_section
+
+    return validate_agent_section(v, path)
+
+
 def _test(v: Any, path: str) -> dict[str, Any]:
     d = _dict(v, path)
     return {
@@ -300,8 +315,9 @@ def validate_result(data: Any) -> dict[str, Any]:
         "head": _sha(d.get("head"), "$.head"),
         "merge_base": _sha(d.get("merge_base"), "$.merge_base", optional=True),
         "verdict": _enum(d.get("verdict"), VERDICTS, "$.verdict"),
-        "claims": _list(d.get("claims"), "$.claims", _claim, 50),
+        "claims": _list(d.get("claims"), "$.claims", _claim_with_source, 50),
         "tests": _tests(d.get("tests"), "$.tests"),
+        "agent": _agent(d.get("agent"), "$.agent"),
         "repro": _list(d.get("repro"), "$.repro", _repro, 10),
         "benchmark": _bench(d.get("benchmark"), "$.benchmark"),
         "scope": _scope(d.get("scope"), "$.scope"),
