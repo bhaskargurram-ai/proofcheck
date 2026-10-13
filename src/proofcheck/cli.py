@@ -178,14 +178,24 @@ def run_cmd(repo: str, base: str, head: str, title: str | None, pr_body_file: st
               help="GitHub event payload (default: $GITHUB_EVENT_PATH).")
 @click.option("--max-issues", default=5, show_default=True, type=click.IntRange(0, 20), help="Maximum issues to fetch.")
 @click.option("--out", "out_path", required=True, type=click.Path(dir_okay=False), help="Where to write context.json.")
-def context_cmd(event_path: str | None, max_issues: int, out_path: str) -> None:
+@click.option("--pr", "pr_number", default=None,
+              help="Read the PR title/body from the GitHub API instead of the event payload (e.g. in a workflow_run job).")
+def context_cmd(event_path: str | None, max_issues: int, out_path: str, pr_number: str | None = None) -> None:
     """Collect PR title/body and referenced issue bodies into a JSON file.
 
     Run this in a CI step *before* any PR code executes, with GITHUB_TOKEN
     available only to this step; then pass the file to `proofcheck run
     --context-file`, which needs no token.
     """
-    ctx = context_from_event(event_path)
+    if pr_number is not None:
+        from .ci import context_from_api
+
+        try:
+            ctx = context_from_api(validate_number(pr_number))
+        except GitHubError as exc:
+            raise click.ClickException(str(exc)) from exc
+    else:
+        ctx = context_from_event(event_path)
     if ctx.repo:
         _fetch_issues(ctx, max_issues)
     data = {"repo": ctx.repo, "number": ctx.number, "title": ctx.title, "body": ctx.body, "issues": ctx.issues}
@@ -204,8 +214,10 @@ def context_cmd(event_path: str | None, max_issues: int, out_path: str) -> None:
 @click.option("--check-pr-files/--no-check-pr-files", default=True, show_default=True,
               help="Ask the GitHub API whether the PR changes workflows/test harness files and add a warning if so.")
 @click.option("--dry-run", is_flag=True, help="Print the card instead of posting it.")
+@click.option("--labels/--no-labels", default=False, show_default=True,
+              help="Also set a `proofcheck: <verdict>` label on the PR (created if missing; stale ones removed).")
 def comment_cmd(json_path: str, pr_number: str | None, repo_slug: str | None, bot_login: str | None,
-                expect_head_sha: str | None, check_pr_files: bool, dry_run: bool) -> None:
+                expect_head_sha: str | None, check_pr_files: bool, dry_run: bool, labels: bool = False) -> None:
     """Post or update the proof card comment on a pull request.
 
     The result file is treated as untrusted: it is validated against the
@@ -255,6 +267,56 @@ def comment_cmd(json_path: str, pr_number: str | None, repo_slug: str | None, bo
     except GitHubError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"{action} proof card comment {cid} on #{number}")
+    if labels:
+        try:
+            added, removed = client.sync_verdict_label(number, result["verdict"])
+        except GitHubError as exc:
+            click.echo(f"warning: could not update labels: {exc}", err=True)
+        else:
+            click.echo(f"labels: added {added or 'none'}, removed {removed or 'none'}")
+
+
+@main.command("summary")
+@click.option("--json", "json_path", required=True, type=click.Path(exists=True, dir_okay=False), help="result.json to render.")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None,
+              help="Append the card here (default: $GITHUB_STEP_SUMMARY, else stdout).")
+def summary_cmd(json_path: str, out_path: str | None) -> None:
+    """Render the proof card from result.json into the job summary.
+
+    Needs no token, so it also works for pull requests from forks. The result
+    is validated and the card re-rendered from it, as in `proofcheck comment`.
+    """
+    from .ci import write_summary
+
+    try:
+        dest = write_summary(json_path, out_path)
+    except (ValueError, ResultValidationError, OSError) as exc:
+        raise click.ClickException(f"could not write summary: {exc}") from exc
+    if dest:
+        click.echo(f"wrote proof card to {dest}", err=True)
+
+
+@main.command("init")
+@click.option("--repo", default=".", show_default=True, type=click.Path(exists=True, file_okay=False), help="Repository to set up.")
+@click.option("--agent", is_flag=True, help="Also add the (experimental, opt-in) agent evidence workflow.")
+@click.option("--force", is_flag=True, help="Overwrite existing files.")
+@click.option("--ref", default=None, help="proofcheck release (tag or commit SHA) the workflows use. Default: this version's tag.")
+@click.option("--runner", type=click.Choice(["pytest", "unittest", "jest"]), default=None, help="Override runner detection.")
+def init_cmd(repo: str, agent: bool, force: bool, ref: str | None, runner: str | None) -> None:
+    """Write caller workflows and a commented proofcheck.toml into a repository."""
+    from .init_cmd import InitError, init_repo
+
+    try:
+        res = init_repo(repo, agent=agent, force=force, ref=ref, runner=runner)
+    except InitError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Detected test runner: {res.runner} ({res.reason})")
+    for path in res.written:
+        click.echo(f"  wrote {path}")
+    click.echo("")
+    click.echo("Next steps:")
+    for i, step in enumerate(res.next_steps, 1):
+        click.echo(f"  {i}. {step}")
 
 
 if __name__ == "__main__":  # pragma: no cover

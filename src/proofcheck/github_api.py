@@ -158,6 +158,80 @@ class GitHubClient:
         data = self._json("POST", f"/repos/{self.repo}/issues/{n}/comments", {"body": body}, ok=(200, 201))
         return "created", int(data["id"])
 
+    # -- labels ----------------------------------------------------------------------
+    def list_issue_labels(self, number: int) -> list[str]:
+        """Names of the labels currently on an issue / PR."""
+        data = self._json("GET", f"/repos/{self.repo}/issues/{validate_number(number)}/labels?per_page=100")
+        if not isinstance(data, list):
+            raise GitHubError("unexpected labels payload")
+        return [str(x["name"]) for x in data if isinstance(x, dict) and isinstance(x.get("name"), str)]
+
+    def ensure_label(self, name: str, color: str, description: str = "") -> bool:
+        """Create the repository label ``name`` if it does not exist. Returns True if created."""
+        resp = self.request("GET", f"/repos/{self.repo}/labels/{_q(name)}")
+        if resp.status == 200:
+            return False
+        if resp.status != 404:
+            raise GitHubError(f"GET label {name!r} -> HTTP {resp.status}")
+        resp = self.request("POST", f"/repos/{self.repo}/labels", {"name": name, "color": color, "description": description})
+        if resp.status == 201:
+            return True
+        if resp.status == 422:  # created concurrently by another run
+            return False
+        raise GitHubError(f"POST label {name!r} -> HTTP {resp.status}: {resp.body[:200].decode('utf-8', 'replace')}")
+
+    def add_label(self, number: int, name: str) -> None:
+        self._json("POST", f"/repos/{self.repo}/issues/{validate_number(number)}/labels", {"labels": [name]})
+
+    def remove_label(self, number: int, name: str) -> None:
+        resp = self.request("DELETE", f"/repos/{self.repo}/issues/{validate_number(number)}/labels/{_q(name)}")
+        if resp.status not in (200, 204, 404):
+            raise GitHubError(f"DELETE label {name!r} -> HTTP {resp.status}")
+
+    def sync_verdict_label(self, number: int, verdict: str) -> tuple[list[str], list[str]]:
+        """Make the PR carry exactly one ``proofcheck: <verdict>`` label.
+
+        Idempotent: labels are only added or removed when needed, the label is
+        created with its colour if the repository lacks it, and only the
+        verdict labels below are ever removed (``proofcheck:agent`` and other
+        labels are left alone). Returns ``(added, removed)``.
+        """
+        n = validate_number(number)
+        wanted = VERDICT_LABELS.get(verdict)
+        current = self.list_issue_labels(n)
+        removed = [lbl for lbl in current if lbl in VERDICT_LABEL_NAMES and lbl != wanted]
+        for lbl in removed:
+            self.remove_label(n, lbl)
+        added: list[str] = []
+        if wanted and wanted not in current:
+            color, desc = LABEL_STYLES[wanted]
+            self.ensure_label(wanted, color, desc)
+            self.add_label(n, wanted)
+            added.append(wanted)
+        return added, removed
+
+
+#: Verdict -> label. ``error`` maps to no label (stale verdict labels are removed).
+VERDICT_LABELS = {
+    "evidence": "proofcheck: verified",
+    "partial": "proofcheck: partial",
+    "contradicted": "proofcheck: contradicted",
+    "no_evidence": "proofcheck: no evidence",
+}
+VERDICT_LABEL_NAMES = frozenset(VERDICT_LABELS.values())
+LABEL_STYLES = {
+    "proofcheck: verified": ("1a7f37", "proofcheck: the PR's claims are backed by executed evidence"),
+    "proofcheck: partial": ("d4a72c", "proofcheck: some claims are backed by evidence, others are not"),
+    "proofcheck: contradicted": ("cf222e", "proofcheck: executed evidence contradicts the PR"),
+    "proofcheck: no evidence": ("8c959f", "proofcheck: no evidence found for the PR's claims (not the same as wrong)"),
+}
+
+
+def _q(name: str) -> str:
+    from urllib.parse import quote
+
+    return quote(name, safe="")
+
 
 #: Files that, when changed by a PR, let the PR influence how its own proof card is produced.
 HARNESS_PATTERNS = (".github/workflows/*", ".github/actions/*", "action.yml", "action.yaml", "proofcheck.toml",
