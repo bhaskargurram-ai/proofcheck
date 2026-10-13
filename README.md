@@ -395,6 +395,8 @@ Many real PRs say "Fixes #123" but add no test, and many issues have no runnable
 
 **Expect it to fail often.** Published research on generating issue-reproducing tests (Otter / Otter++, [arXiv:2502.05368](https://arxiv.org/abs/2502.05368); see also SWT-bench) reports fail-to-pass success on roughly **a third of issues** (about 31–37 %), at under $0.10 per issue in that setup. We have not benchmarked proofcheck's agent; its token use and cost are recorded on every card. When it succeeds, the card shows the test in a collapsible block: **commit it** to keep the evidence.
 
+**Projects and Rust.** In a repository with several `[[project]]` tables, the agent works in the project whose source the PR mainly changes, and runs its candidates there with that project's runner. For a cargo project it writes a Rust **integration test** (`<crate>/tests/proofcheck_agent_<variant>.rs`) in the crate with the most changed lines, using only the crate's **public API** (`use <crate>::...`); private items and inline `#[cfg(test)]` modules are out of reach, and a candidate that only fails on base because it does not compile there counts as weak evidence. Rust candidates have their own static checks (balanced brackets, a `#[test]` fn, no processes, network, `unsafe` or environment reads). See [docs/AGENT.md](docs/AGENT.md#rust-cargo-projects).
+
 `proofcheck agent run` chains propose and verify with up to `agent.max_rounds` refinement rounds that feed execution output back to the model. Use it **only locally or in trusted contexts**: it runs untrusted code in the same process that holds the API key. In CI, the agent workflow keeps propose and verify in separate jobs. Details are in [docs/AGENT.md](docs/AGENT.md).
 
 ## Security model
@@ -479,7 +481,7 @@ variants = 3                           # 4 adds "localize-first"
 max_rounds = 2                         # refinement rounds, `agent run` only
 max_tool_calls = 25                    # per variant
 test_dir = "tests/proofcheck_agent"
-test_timeout = 120                     # seconds per candidate and commit
+# test_timeout = 120                   # seconds per candidate and commit (default 120; cargo: the project's timeout)
 max_output_tokens = 4096               # per model response
 max_total_tokens = 1500000             # input + output over the whole run
 max_cost_usd = 0                       # 0 = no cap; enforced only when prices are set
