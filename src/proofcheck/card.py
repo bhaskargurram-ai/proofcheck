@@ -134,6 +134,8 @@ def _claims_section(result: dict[str, Any]) -> list[str]:
     for c in claims:
         icon = ICONS.get(c["status"], "⚠️")
         label = LABELS.get(c["status"], c["status"])
+        if c["status"] == "verified" and c.get("verified_by") == "agent":
+            label = "verified (agent test)"
         claim = f"**{escape_md(c['text'], 80)}**"
         if c.get("source") and _clean(c["source"], 400) != _clean(c["text"], 400):
             claim += f"<br><sub>“{escape_md(c['source'], 160)}”</sub>"
@@ -217,6 +219,12 @@ def _repro_section(result: dict[str, Any]) -> list[str]:
     return out
 
 
+def _agent_section(result: dict[str, Any]) -> list[str]:
+    from .agent.card import agent_section
+
+    return agent_section(result)
+
+
 def _bench_section(result: dict[str, Any]) -> list[str]:
     b = result.get("benchmark")
     if not b:
@@ -269,6 +277,7 @@ def render_card(result: dict[str, Any], trusted_warnings: list[str] | None = Non
     lines += _claims_section(result)
     lines += _tests_section(result)
     lines += _repro_section(result)
+    lines += _agent_section(result)
     lines += _bench_section(result)
     lines += _scope_section(result)
     for n in (result.get("notes") or [])[:5]:
