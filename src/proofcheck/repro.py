@@ -42,11 +42,51 @@ _NON_SCRIPT_RE = re.compile(r"^\s*(>>>|\$ |Traceback \(most recent call last\))"
 _ADDR_RE = re.compile(r"0x[0-9a-fA-F]{6,}")
 
 
-def extract_python_blocks(text: str, limit: int = MAX_SNIPPETS) -> list[str]:
-    """Return the bodies of fenced ``python``/``py`` code blocks in ``text``.
+#: Info strings of blocks that hold an interactive (doctest-style) session.
+_SESSION_LANGS = {"pycon", "doctest", "pyrepl", "python-repl", "repl", ""}
 
-    Blocks that look like interactive sessions (``>>>``), shell transcripts or
-    tracebacks are skipped, as are oversized blocks.
+
+def doctest_to_script(text: str) -> str | None:
+    """Convert a ``>>>`` session into a script that behaves like the interpreter.
+
+    Each example is compiled in ``"single"`` mode, so expression values are
+    printed with their ``repr`` just as in the interactive prompt, and an
+    exception stops the script with a traceback and a non-zero exit code.
+    Expected-output lines are ignored: proofcheck compares base and head
+    behaviour instead of trusting what the issue author pasted. Returns None
+    if the text is not a well-formed session.
+    """
+    import doctest
+
+    try:
+        examples = doctest.DocTestParser().get_examples(text)
+    except ValueError:
+        return None
+    if not examples:
+        return None
+    first = examples[0].source.strip().splitlines()[0]
+    lines = [f"# >>> {first}", "# (converted by proofcheck from a doctest-style session)"]
+    for ex in examples:
+        lines.append(f"exec(compile({ex.source!r}, '<doctest>', 'single'))")
+    return "\n".join(lines) + "\n"
+
+
+def _first_code_line(body: str) -> str:
+    for line in body.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def extract_python_blocks(text: str, limit: int = MAX_SNIPPETS) -> list[str]:
+    """Return runnable Python snippets from the fenced code blocks in ``text``.
+
+    * ``python`` / ``py`` / ``python3`` / ``py3`` blocks are used as scripts;
+    * doctest-style sessions (blocks whose first line starts with ``>>>``, in a
+      ``python``/``py``/``pycon``/``doctest`` or unlabelled fence) are
+      converted to equivalent scripts with :func:`doctest_to_script`;
+    * shell transcripts, tracebacks and scripts with stray ``>>>`` lines are
+      skipped, as are oversized blocks.
     """
     blocks: list[str] = []
     for m in _FENCE_RE.finditer(text or ""):
@@ -54,12 +94,20 @@ def extract_python_blocks(text: str, limit: int = MAX_SNIPPETS) -> list[str]:
         lang = info[0].lower() if info else ""
         if lang.startswith("{") and lang.endswith("}"):
             lang = lang.strip("{}.")
-        if lang not in _PY_LANGS:
+        if lang not in _PY_LANGS and lang not in _SESSION_LANGS:
             continue
         body = m.group("body")
-        if not body.strip() or len(body) > MAX_SNIPPET_CHARS or _NON_SCRIPT_RE.search(body):
+        if not body.strip() or len(body) > MAX_SNIPPET_CHARS:
             continue
-        blocks.append(body)
+        if _first_code_line(body).startswith(">>>"):
+            script = doctest_to_script(body)
+            if script is None:
+                continue
+            blocks.append(script)
+        elif lang not in _PY_LANGS or _NON_SCRIPT_RE.search(body):
+            continue
+        else:
+            blocks.append(body)
         if len(blocks) >= limit:
             break
     return blocks
@@ -181,7 +229,7 @@ def reproduce_issue(
     """Run every Python snippet from an issue body on base and head."""
     blocks = extract_python_blocks(body)
     if not blocks:
-        return IssueRepro(label, "no_snippets", note="No runnable ```python code block found in the issue.")
+        return IssueRepro(label, "no_snippets", note="No runnable ```python code block or >>> session found in the issue.")
     results = []
     for i, code in enumerate(blocks, 1):
         b = run_snippet(code, base_wt, python, timeout, environ)
