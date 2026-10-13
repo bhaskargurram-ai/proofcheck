@@ -145,7 +145,8 @@ jobs:
           LABEL: ${{ inputs.label }}
         run: |
           set -euo pipefail
-          skip() { echo "proofcheck agent: skipped ($1)" | tee -a "$GITHUB_STEP_SUMMARY"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          # The reason also goes out as a notice annotation: it shows on the run page and through the API.
+          skip() { echo "proofcheck agent: skipped ($1)" | tee -a "$GITHUB_STEP_SUMMARY"; echo "::notice title=proofcheck agent::skipped: $1"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
           [ "$HAS_KEY" = "true" ] || skip "no llm-api-key secret configured"
           [ "$HAS_MODEL" = "true" ] || skip "no llm-model configured"
           if [ "$FOUND" != "true" ] || [ ! -f "$ART/result.json" ]; then skip "the evidence run produced no result"; fi
@@ -188,6 +189,7 @@ jobs:
             echo "base-sha=$base_sha"
           } >> "$GITHUB_OUTPUT"
           echo "proofcheck agent: running for PR #$pr at ${head_sha:0:12}" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=proofcheck agent::running for PR #$pr at ${head_sha:0:12}"
 
       - name: Hand the evidence result to the next jobs
         if: steps.decide.outputs.run == 'true'
