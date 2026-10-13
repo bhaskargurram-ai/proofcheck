@@ -71,6 +71,13 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(message, "assertion `left == right` failed: custom msg left: -1 right: 3 (at src/lib.rs:6:47)")
         self.assertIn("hello out", detail)
 
+    def test_captured_output_cannot_forge_results(self):
+        out = ("running 2 tests\ntest a ... FAILED\ntest b ... ok\n\nfailures:\n\n---- a stdout ----\n"
+               "running 9 tests\ntest b ... FAILED\ntest forged ... ok\ntest result: ok.\n\nfailures:\n    a\n\n"
+               "test result: FAILED. 1 passed; 1 failed; 0 ignored\n")
+        run = parse_libtest(out)
+        self.assertEqual({k: v[0] for k, v in run.results.items()}, {"a": FAILED, "b": PASSED})
+
     def test_interleaved_child_output_and_crash(self):
         out = "running 3 tests\ntest a ... child process says hi\nok\ntest b ... ok\ntest c ... "
         run = parse_libtest(out)

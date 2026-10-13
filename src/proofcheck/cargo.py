@@ -228,14 +228,6 @@ def parse_libtest(stdout: str) -> LibtestRun:
     current: str | None = None
     for raw in stdout.splitlines():
         line = raw.rstrip("\r")
-        if line.startswith("running ") and line.endswith((" tests", " test")):
-            run.started = True
-            pending, current = None, None
-            continue
-        if line.startswith("test result: "):
-            run.finished = True
-            pending, current = None, None
-            continue
         m = _FAIL_HDR_RE.match(line)
         if m:
             current = m.group(1)
@@ -245,7 +237,16 @@ def parse_libtest(stdout: str) -> LibtestRun:
             current = None
             continue
         if current is not None:
+            # Captured output of a failed test: anything may appear here.
             failures[current].append(line)
+            continue
+        if line.startswith("running ") and line.endswith((" tests", " test")):
+            run.started = True
+            pending = None
+            continue
+        if line.startswith("test result: "):
+            run.finished = True
+            pending = None
             continue
         m = _TEST_LINE_RE.match(line)
         if m:

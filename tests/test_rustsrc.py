@@ -70,6 +70,11 @@ class LexerTest(unittest.TestCase):
         self.assertBalanced(src, 1)
         self.assertBalanced("#![allow(dead_code)]\nfn f() {}", 1)
 
+    def test_deep_nesting_is_an_error_not_a_crash(self):
+        src = "fn f() " + "{" * 5000 + "}" * 5000
+        with self.assertRaises(RustLexError):
+            analyze(src)
+
     def test_ambiguous_inputs_raise(self):
         for bad in ["let c = 'ab';", 'let s = "unterminated;', "let s = r#\"no end\";", "fn f() { {",
                     "fn f() }", "fn f() { ( }", "let c = '\\u{1F600", "let c = ''"]:

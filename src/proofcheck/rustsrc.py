@@ -367,12 +367,21 @@ class RustTestLayout:
     test_functions: list[Item]
 
 
+#: Larger files are not analysed (they are not hand-written test modules).
+MAX_SOURCE_CHARS = 4_000_000
+
+
 def analyze(src: str) -> RustTestLayout:
     """Locate ``#[cfg(test)]`` modules and test functions. Raises :class:`RustLexError`."""
+    if len(src) > MAX_SOURCE_CHARS:
+        raise RustLexError("file too large to analyse")
     s = _Source(src)
     mods: list[Item] = []
     fns: list[Item] = []
-    _walk(s, 0, len(s.toks), [], mods, fns, False)
+    try:
+        _walk(s, 0, len(s.toks), [], mods, fns, False)
+    except RecursionError:
+        raise RustLexError("blocks nested too deeply to analyse") from None
     return RustTestLayout(mods, fns)
 
 
