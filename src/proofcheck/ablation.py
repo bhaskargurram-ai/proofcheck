@@ -409,6 +409,65 @@ def _evaluate(
     return broken, None
 
 
+#: Extensions treated as source code when choosing which hunks to test first.
+CODE_SUFFIXES = frozenset({
+    ".py", ".pyx", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".rb",
+    ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".swift", ".scala", ".php",
+})
+_NON_SOURCE_DIRS = ("examples/", "example/", "docs/", "doc/", "scripts/", "benchmarks/", ".github/")
+
+
+def _module_names(path: str) -> list[str]:
+    """Names a test could use to refer to ``path`` (dotted module, file stem)."""
+    p = PurePosixPath(path)
+    parts = list(p.with_suffix("").parts)
+    if parts and parts[0] in ("src", "lib", "python"):
+        parts = parts[1:]
+    if parts and parts[-1] in ("__init__", "index", "mod", "lib", "main"):
+        parts = parts[:-1]
+    names = []
+    if len(parts) > 1:
+        names.append(".".join(parts))
+        names.append("/".join(parts))
+    if parts and len(parts[-1]) >= 3:
+        names.append(parts[-1])
+    return names
+
+
+def _hunk_rank(hunk: Hunk, evidence_text: str) -> int:
+    """0: source the evidence refers to; 1: other source; 2: everything else (config, examples, data)."""
+    path = hunk.file
+    if PurePosixPath(path).suffix.lower() not in CODE_SUFFIXES or path.startswith(_NON_SOURCE_DIRS):
+        return 2
+    for name in _module_names(path):
+        if re.search(rf"(?<![\w.]){re.escape(name)}(?![\w])", evidence_text):
+            return 0
+    return 1
+
+
+def prioritize_hunks(hunks: Sequence[Hunk], evidence_texts: Sequence[str]) -> list[Hunk]:
+    """Order hunks so the cap spends its budget on code the evidence can depend on.
+
+    Source files that the fail→pass tests (or reproducers) mention come first,
+    then other source files, then configuration, examples and data. The order
+    is stable and deterministic within each group.
+    """
+    text = "\n".join(evidence_texts)
+    return sorted(hunks, key=lambda h: (_hunk_rank(h, text), h.file, h.new_start, h.old_start))
+
+
+def _evidence_texts(repo: str | Path, head: str, test_files: Sequence[str]) -> list[str]:
+    out = []
+    for path in test_files[:50]:
+        try:
+            data = gitmod.show_file(repo, head, path)
+        except gitmod.GitError:
+            data = None
+        if data:
+            out.append(data[:200_000].decode("utf-8", "replace"))
+    return out
+
+
 def run_ablation(
     repo: str | Path,
     base: str,
@@ -449,6 +508,7 @@ def run_ablation(
         result.status = STATUS_NO_HUNKS
         result.notes.append("No non-test text changes to ablate.")
         return result
+    hunks = prioritize_hunks(hunks, _evidence_texts(repo, head, modules) + [s.code for s in snippets])
     cap = max(0, int(max_hunks))
     selected, result.untested_over_cap = hunks[:cap], max(0, len(hunks) - cap)
     if result.untested_over_cap:
@@ -521,6 +581,10 @@ def summary_text(ablation: Mapping[str, Any]) -> str:
     if not tested:
         return ""
     noun, verb = ("hunk", "is") if tested == 1 else ("hunks", "are")
+    untested = int(ablation.get("untested_over_cap", 0) or 0)
+    if untested:
+        total = int(ablation.get("total_hunks", tested + untested) or tested + untested)
+        return f"{req}/{tested} tested {noun} {verb} required by the evidence ({untested} of {total} changed hunks not tested)"
     return f"{req}/{tested} changed {noun} {verb} required by the evidence"
 
 

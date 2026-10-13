@@ -318,3 +318,34 @@ class CliFlagTest(AblationRepoCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrioritizeTest(unittest.TestCase):
+    """The hunk cap must be spent on code the evidence can depend on, not on config files."""
+
+    @staticmethod
+    def hunk(path: str, start: int = 1) -> "A.Hunk":
+        return A.Hunk(file=path, kind="modify", old_start=start, old_count=1, new_start=start, new_count=1, patch="")
+
+    def test_referenced_source_first_then_other_source_then_the_rest(self):
+        hunks = [self.hunk(p) for p in ("action.yml", "examples/demo/app.py", "src/pkg/other.py",
+                                        "README.md", "src/pkg/claims.py", "pyproject.toml", "src/pkg/__init__.py")]
+        evidence = ["from pkg.claims import extract\nimport pkg\n"]
+        order = [h.file for h in A.prioritize_hunks(hunks, evidence)]
+        self.assertEqual(order[:2], ["src/pkg/__init__.py", "src/pkg/claims.py"])  # referenced by the tests
+        self.assertEqual(order[2], "src/pkg/other.py")  # other source
+        self.assertEqual(set(order[3:]), {"action.yml", "examples/demo/app.py", "README.md", "pyproject.toml"})
+
+    def test_order_is_stable_and_deterministic(self):
+        hunks = [self.hunk("src/a.py", 30), self.hunk("src/a.py", 2), self.hunk("src/b.py", 1)]
+        once = [(h.file, h.new_start) for h in A.prioritize_hunks(hunks, [""])]
+        again = [(h.file, h.new_start) for h in A.prioritize_hunks(list(reversed(hunks)), [""])]
+        self.assertEqual(once, [("src/a.py", 2), ("src/a.py", 30), ("src/b.py", 1)])
+        self.assertEqual(once, again)
+
+    def test_summary_mentions_untested_hunks_over_the_cap(self):
+        base = {"status": "ran", "tested": 12, "required": 3, "total_hunks": 12, "untested_over_cap": 0}
+        self.assertEqual(A.summary_text(base), "3/12 changed hunks are required by the evidence")
+        capped = dict(base, total_hunks=86, untested_over_cap=74)
+        self.assertEqual(A.summary_text(capped),
+                         "3/12 tested hunks are required by the evidence (74 of 86 changed hunks not tested)")
