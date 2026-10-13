@@ -172,7 +172,7 @@ against a determined attacker**, and it does not replace review. Treat ✅ as
 | Workflow | Permissions | Runs PR code? |
 |---|---|---|
 | `proofcheck.yml` (`pull_request`) | `contents: read` | yes |
-| `proofcheck-comment.yml` (`workflow_run`) | `pull-requests: write`, `actions: read` | **never** |
+| `proofcheck-comment.yml` (`workflow_run`) | `contents: read`, `pull-requests: write`, `actions: read` | **never** |
 
 - If you run the unprivileged workflow on a private repository where the
   token can read issues, the `context` step reads them. On public
