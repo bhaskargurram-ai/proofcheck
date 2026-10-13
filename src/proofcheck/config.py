@@ -101,6 +101,7 @@ _SIMPLE_KEYS = {
     "timeout", "benchmark_command", "benchmark_runs", "benchmark_timeout", "large_diff_threshold",
     "max_issues", "repro", "llm",
 }
+_SIMPLE_KEYS.add("agent")  # the [agent] table; validated by proofcheck.agent.config
 
 
 def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
@@ -110,6 +111,8 @@ def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
     unknown = set(data) - _SIMPLE_KEYS
     if unknown:
         raise ConfigError(f"unknown config key(s): {', '.join(sorted(unknown))}")
+    if "agent" in data:
+        _validate_agent_table(data["agent"], source)
     cfg = Config(source=source)
     if "runner" in data:
         if not isinstance(data["runner"], str):
@@ -163,6 +166,16 @@ def config_from_dict(data: dict[str, Any], source: str = "<dict>") -> Config:
     if "api_key" in llm:
         raise ConfigError("never put API keys in proofcheck.toml; use the PROOFCHECK_LLM_API_KEY environment variable")
     return cfg
+
+
+def _validate_agent_table(table: Any, source: str) -> None:
+    """Fail early on an invalid ``[agent]`` table (it is used by ``proofcheck agent``)."""
+    from .agent.config import AgentConfigError, parse_agent_config
+
+    try:
+        parse_agent_config(table, source)
+    except AgentConfigError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def parse_config_text(text: str, source: str, pyproject: bool = False) -> Config | None:
