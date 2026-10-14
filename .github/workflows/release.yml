@@ -1,28 +1,44 @@
-# Release: on a `v*` tag, build the sdist and wheel, publish them to PyPI with
-# trusted publishing (no API token stored anywhere), and create a GitHub
-# release whose notes are the matching CHANGELOG.md section.
+# Release: build, test, publish to PyPI and create the GitHub release.
 #
-# One-time setup (repository owner):
-#   1. On PyPI, add a trusted publisher for the `proofcheck` project
-#      (https://pypi.org/manage/account/publishing/ for a new project, or the
-#      project's Settings -> Publishing): owner `bhaskargurram-ai`, repository
-#      `proofcheck`, workflow `release.yml`, environment `pypi`.
-#   2. In the GitHub repository, create the environment `pypi`
-#      (Settings -> Environments); optionally require a reviewer and restrict
-#      it to tags matching `v*`.
-#   3. Bump the version in pyproject.toml and src/proofcheck/__init__.py, add a
-#      CHANGELOG.md section `## [X.Y.Z] - date`, commit, then either
-#      `git tag vX.Y.Z && git push origin vX.Y.Z`, or create the release on
-#      github.com with a new tag vX.Y.Z (this workflow then attaches the files).
-#      The GitHub release does not wait for PyPI, so it works before step 1.
+# Before releasing: bump the version in pyproject.toml and
+# src/proofcheck/__init__.py, add a CHANGELOG.md section `## [X.Y.Z] - date`, and
+# merge that to main. Then either:
+#   * Actions -> release -> Run workflow (on main), version X.Y.Z. The workflow
+#     checks the version, creates the tag vX.Y.Z on that commit, tests, builds,
+#     publishes to PyPI and creates the GitHub release; nothing to push by hand;
+#   * or push a tag vX.Y.Z (or create a release with a new tag on github.com).
+#
+# PyPI credentials (one of):
+#   * repository secret PYPI_API_TOKEN: a PyPI API token. For the very first
+#     upload of a new project it has to be an "Entire account" token; after
+#     that, replace it with a token scoped to the proofcheck project;
+#   * trusted publishing, no secret at all: on PyPI add a (pending) trusted
+#     publisher with owner `bhaskargurram-ai`, repository `proofcheck`, workflow
+#     `release.yml`, environment `pypi`, and delete the secret.
+# The publish job uses the token when the secret is set, trusted publishing
+# otherwise. The GitHub release does not depend on PyPI.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, X.Y.Z (must equal pyproject.toml); the tag vX.Y.Z is created"
+        required: true
+        type: string
+      pypi:
+        description: "Publish to PyPI"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -30,6 +46,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,15 +55,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Check the tag matches the package version
+      - name: Resolve the tag
+        id: tag
         env:
-          TAG: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION#v}"
+            if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$'; then
+              echo "::error::version '$INPUT_VERSION' is not X.Y.Z"; exit 1
+            fi
+            tag="v$version"
+          else
+            tag="$REF_NAME"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Check the tag matches the package version and the changelog
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           init="$(python3 -c 'import re; print(re.search(r"__version__ = \"([^\"]+)\"", open("src/proofcheck/__init__.py").read()).group(1))')"
           if [ "$TAG" != "v$version" ] || [ "$init" != "$version" ]; then
             echo "::error::tag $TAG does not match pyproject ($version) / __init__ ($init)"; exit 1
+          fi
+          if ! grep -Eq "^## \[${version//./\\.}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section"; exit 1
           fi
       - name: Test
         run: |
@@ -55,34 +94,83 @@ jobs:
       - name: Build sdist and wheel
         run: |
           set -euo pipefail
-          python -m pip install --upgrade build
+          python -m pip install --upgrade build twine
           python -m build
+          python -m twine check --strict dist/*
+      - name: Smoke-test the wheel in a clean environment
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -m pip install --quiet dist/*.whl
+          "$RUNNER_TEMP/wheel-venv/bin/proofcheck" --version
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
           retention-days: 7
 
-  publish:
+  tag:
+    # Only for "Run workflow": create the tag on the commit that was tested.
+    # A tag created with the workflow's own token does not start this workflow
+    # again, so there is exactly one release run.
+    if: github.event_name == 'workflow_dispatch'
     needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write   # create the tag
+    steps:
+      - name: Create tag ${{ needs.build.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ref="$(gh api "repos/$REPO/git/ref/tags/$TAG" 2>/dev/null)"; then
+            sha="$(printf '%s' "$ref" | jq -r .object.sha)"
+            if [ "$(printf '%s' "$ref" | jq -r .object.type)" = "tag" ]; then
+              sha="$(gh api "repos/$REPO/git/tags/$sha" --jq .object.sha)"
+            fi
+            if [ "$sha" != "$SHA" ]; then
+              echo "::error::tag $TAG already exists on $sha, not on $SHA"; exit 1
+            fi
+            echo "tag $TAG already exists on $SHA"
+          else
+            gh api "repos/$REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" >/dev/null
+            echo "created tag $TAG on $SHA"
+          fi
+
+  publish:
+    needs: [build, tag]
+    if: >-
+      always() && needs.build.result == 'success'
+      && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
+      && (github.event_name != 'workflow_dispatch' || inputs.pypi)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/project/proofcheck/
     permissions:
-      id-token: write   # trusted publishing (OIDC); no PyPI token is stored
+      id-token: write   # trusted publishing (OIDC), used when PYPI_API_TOKEN is not set
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Empty when the secret is not set: the action then uses trusted publishing.
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true   # re-running a release does not fail on files already uploaded
 
   github-release:
-    # Not gated on the PyPI publish: the GitHub release (with the built files)
-    # exists even before the one-time PyPI trusted-publisher setup is done.
-    needs: build
+    needs: [build, tag]
+    if: >-
+      always() && needs.build.result == 'success'
+      && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -97,7 +185,7 @@ jobs:
           path: dist/
       - name: Extract release notes from CHANGELOG.md
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
           set -euo pipefail
           python3 - "${TAG#v}" > "$RUNNER_TEMP/notes.md" <<'PY'
@@ -110,7 +198,7 @@ jobs:
       - name: Create the GitHub release (or attach the files to one made on github.com)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.build.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
