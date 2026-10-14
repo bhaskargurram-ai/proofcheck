@@ -99,8 +99,9 @@ All notable changes to this project are documented here. The format follows
 - Issue reproducers: doctest-style `>>>` sessions (in `pycon`, `doctest`,
   `python`, `py` or unlabelled fences) are converted into scripts that print
   each expression like the interactive prompt.
-- `release.yml` (PyPI trusted publishing and a GitHub release from the
-  CHANGELOG) and `pages.yml` (deploys `docs/site/` on public repositories).
+- `release.yml`: one-click releases (Actions → release → Run workflow creates
+  the tag), PyPI publishing with a `PYPI_API_TOKEN` secret or trusted
+  publishing, and a GitHub release from the CHANGELOG and `pages.yml` (deploys `docs/site/` on public repositories).
 - Workflow security invariants are tested (`tests/test_workflows.py`).
 
 ### Changed
