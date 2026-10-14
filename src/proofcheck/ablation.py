@@ -37,6 +37,7 @@ from __future__ import annotations
 import fnmatch
 import re
 import shutil
+import ast
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ from .repro import BEHAVIOR_CHANGED, SnippetRun, compare_runs, extract_python_bl
 REQUIRED = "required"
 NOT_EXERCISED = "not_exercised"
 SKIPPED = "skipped"
+DOCS_ONLY = "docs_only"  # reverting it leaves the code unchanged: only comments, docstrings or formatting
 
 # Overall statuses
 STATUS_RAN = "ran"
@@ -165,6 +167,7 @@ class Ablation:
             "required": self.count(REQUIRED),
             "not_exercised": self.count(NOT_EXERCISED),
             "skipped": self.count(SKIPPED),
+            "docs_only": self.count(DOCS_ONLY),
             "untested_over_cap": self.untested_over_cap,
             "budget_s": float(self.budget_s),
             "elapsed_s": round(self.elapsed_s, 3),
@@ -390,6 +393,40 @@ def _reverse_apply(wt: Path, hunk: Hunk, tmp: Path) -> str | None:
     return None
 
 
+#: Suffixes whose hunks can be recognised as comment/docstring/formatting-only changes.
+_PY_SUFFIXES = frozenset({".py", ".pyi"})
+
+
+def _code_ast(text: str) -> str | None:
+    """A dump of the Python AST without docstrings; comments and formatting never reach the AST."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and body
+                and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            node.body = body[1:] or [ast.Pass()]
+    return ast.dump(tree, include_attributes=False)
+
+
+def is_docs_only(path: str, head_text: str, reverted_text: str) -> bool:
+    """True if reverting a hunk changes no Python code: only comments, docstrings or formatting differ."""
+    if PurePosixPath(path).suffix.lower() not in _PY_SUFFIXES or head_text == reverted_text:
+        return False
+    a, b = _code_ast(head_text), _code_ast(reverted_text)
+    return a is not None and a == b
+
+
+def _read_text(path: Path) -> str | None:
+    try:
+        return path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def _evaluate(
     runner: Any,
     wt: Path,
@@ -576,10 +613,18 @@ def run_ablation(
                     result.hunks.append(HunkResult(hunk, SKIPPED, reason="time budget exhausted"))
                     continue
                 started = clock()
+                head_text = _read_text(wt / hunk.file) if hunk.kind == "modify" else None
                 err = _reverse_apply(wt, hunk, tmp)
                 if err:
                     _restore(wt, hunk)
                     result.hunks.append(HunkResult(hunk, SKIPPED, reason=err, duration=clock() - started))
+                    continue
+                reverted_text = _read_text(wt / hunk.file) if head_text is not None else None
+                if head_text is not None and reverted_text is not None and is_docs_only(hunk.file, head_text, reverted_text):
+                    # Nothing to run: the code is the same with or without this hunk.
+                    _restore(wt, hunk)
+                    result.hunks.append(HunkResult(hunk, DOCS_ONLY, reason="only comments, docstrings or formatting change",
+                                                   duration=clock() - started))
                     continue
                 try:
                     broken, why = _evaluate(runner, wt, test_ids, modules, snippets, env, environ, python,
@@ -614,11 +659,20 @@ def summary_text(ablation: Mapping[str, Any]) -> str:
     req = int(ablation.get("required", 0))
     if not tested:
         return ""
+    docs = int(ablation.get("docs_only", 0) or 0)
+    tested -= docs  # comment/docstring-only hunks are not code the evidence could depend on
+    tail = f", {docs} comment/docstring-only" if docs else ""
+    if tested <= 0:
+        return f"{docs} changed hunk{'s' if docs != 1 else ''} touch only comments or docstrings" if docs else ""
     noun, verb = ("hunk", "is") if tested == 1 else ("hunks", "are")
     untested = int(ablation.get("untested_over_cap", 0) or 0)
     if untested:
         total = int(ablation.get("total_hunks", tested + untested) or tested + untested)
-        return f"{req}/{tested} tested {noun} {verb} required by the evidence ({untested} of {total} changed hunks not tested)"
+        code_word = "code " if docs else ""
+        return (f"{req}/{tested} tested {code_word}{noun} {verb} required by the evidence "
+                f"({untested} of {total} changed hunks not tested{tail})")
+    if docs:
+        return f"{req}/{tested} changed code {noun} {verb} required by the evidence ({docs} comment/docstring-only)"
     return f"{req}/{tested} changed {noun} {verb} required by the evidence"
 
 

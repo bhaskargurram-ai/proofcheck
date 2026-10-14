@@ -155,7 +155,7 @@ tool, can read instead of scraping the Markdown:
 <!-- proofcheck:data {"v":1,"tool":"…","pr":4,"head":"<sha>","base":"<sha>","merge_base":"<sha>","verdict":"evidence",
   "claims":[{"type":"fixes_issue","text":"fixes #3","status":"verified"}],
   "tests":{"status":"evidence","fail_to_pass":1,"pass_to_pass":0,"fail_on_head":0,"error":0,"skipped":0},
-  "ablation":{"status":"ran","total_hunks":2,"tested":2,"required":1,"not_exercised":1,"skipped":0},
+  "ablation":{"status":"ran","total_hunks":2,"tested":2,"required":1,"not_exercised":1,"skipped":0,"docs_only":0},
   "repro":["behavior_changed"],"agent":null,"flags":["unexercised"],"files":3,"warnings":0} -->
 ```
 

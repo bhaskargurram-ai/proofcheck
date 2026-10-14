@@ -280,8 +280,8 @@ def _scope_section(result: dict[str, Any]) -> list[str]:
     return out
 
 
-HUNK_ICONS = {"required": "✅", "not_exercised": "⚠️", "skipped": "⏭️"}
-HUNK_LABELS = {"required": "required", "not_exercised": "not exercised", "skipped": "skipped"}
+HUNK_ICONS = {"required": "✅", "not_exercised": "⚠️", "skipped": "⏭️", "docs_only": "📝"}
+HUNK_LABELS = {"required": "required", "not_exercised": "not exercised", "skipped": "skipped", "docs_only": "docs only"}
 MAX_HUNK_ROWS = 25
 
 
@@ -303,7 +303,9 @@ def _ablation_section(result: dict[str, Any]) -> list[str]:
         out += ["❔ The diff evidence map could not be completed; see notes.", ""]
     else:
         out += ["Each changed hunk was reverted on its own and the fail→pass tests / changed reproducers were re-run. "
-                "✅ *required*: reverting it breaks the evidence. ⚠️ *not exercised*: nothing that was measured depends on it.", ""]
+                "✅ *required*: reverting it breaks the evidence. ⚠️ *not exercised*: nothing that was measured depends on it."
+                + (" 📝 *docs only*: it changes only comments, docstrings or formatting, so there was nothing to run."
+                   if a.get("docs_only") else ""), ""]
     rows = a.get("hunks") or []
     if rows:
         out += ["| Hunk | Status | Evidence that broke |", "|---|---|---|"]
@@ -314,7 +316,7 @@ def _ablation_section(result: dict[str, Any]) -> list[str]:
                 broke = ", ".join(code(b, 80) for b in h.get("broken_by", [])[:3])
                 extra = len(h.get("broken_by", [])) - 3
                 detail = broke + (f" and {extra} more" if extra > 0 else "")
-            elif h["status"] == "skipped":
+            elif h["status"] in ("skipped", "docs_only"):
                 detail = escape_md(h.get("reason", ""), 160)
             else:
                 detail = "—"

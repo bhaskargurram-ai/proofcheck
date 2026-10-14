@@ -23,9 +23,9 @@ concurrency:
 
 jobs:
   evidence:
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.1
     with:
-      proofcheck-ref: v1.0.0
+      proofcheck-ref: v1.0.1
       python-version: "3.12"
       # Installs the project under test; this runs PR code (unprivileged job).
       install-command: 'pip install -e ".[dev]" pytest || pip install pytest'

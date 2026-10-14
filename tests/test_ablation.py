@@ -87,6 +87,30 @@ class RequiredAndUnexercisedTest(AblationRepoCase):
         self.assertEqual(leftover_worktrees(self.repo.path), [])
         self.assertEqual(_helpers.git(self.repo.path, "status", "--porcelain"), "")
 
+    def test_comment_and_docstring_only_hunks_are_not_scope_flagged(self):
+        documented = FIXED.replace("def mul(a, b):\n", 'def mul(a, b):\n    """Return a * b."""\n')
+        util = "def greet():\n    # say hello\n    return 'hi'\n"
+        self.pr({"calc.py": documented, "util.py": util, "tests/test_calc.py": GOOD_TESTS})
+        result = self.check()
+        a = result["ablation"]
+        by_loc = {h["location"]: h["status"] for h in a["hunks"]}
+        self.assertEqual(by_loc, {"calc.py:2": "required", "calc.py:6": "docs_only", "util.py:2": "docs_only"})
+        self.assertEqual((a["required"], a["not_exercised"], a["docs_only"]), (1, 0, 2))
+        self.assertEqual([f for f in result["scope"]["flags"] if f["kind"] == "unexercised"], [])
+        card = render_card(result)
+        self.assertIn("1/1 changed code hunk is required by the evidence (2 comment/docstring-only)", card)
+        self.assertIn("| `util.py:2` | 📝 docs only | only comments, docstrings or formatting change |", card)
+        self.assertEqual(_helpers.git(self.repo.path, "status", "--porcelain"), "")
+
+    def test_is_docs_only(self):
+        self.assertTrue(A.is_docs_only("m.py", "x = 1  # one\n", "x = 1\n"))
+        self.assertTrue(A.is_docs_only("m.py", 'def f():\n    """New."""\n    return 1\n', "def f():\n    return 1\n"))
+        self.assertTrue(A.is_docs_only("m.py", "x = (1 +\n     2)\n", "x = (1 + 2)\n"))  # formatting
+        self.assertFalse(A.is_docs_only("m.py", "x = 2\n", "x = 1\n"))
+        self.assertFalse(A.is_docs_only("m.py", 'msg = "a"\n', 'msg = "b"\n'))  # a string that is not a docstring
+        self.assertFalse(A.is_docs_only("m.js", "x = 1 // c\n", "x = 1\n"))  # only Python is recognised
+        self.assertFalse(A.is_docs_only("m.py", "def f(:\n", "def f():\n    pass\n"))  # unparsable
+
     def test_disabled_and_not_applicable(self):
         self.pr({"calc.py": FIXED, "tests/test_calc.py": GOOD_TESTS})
         self.assertIsNone(self.check(enabled=False)["ablation"])

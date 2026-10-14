@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-10-14
+
+### Changed
+
+- Diff evidence map: in Python files, a hunk that changes only comments,
+  docstrings or formatting is marked 📝 *docs only* and is not run. Before, it
+  was "not exercised" and got a "check it belongs in this PR" scope note,
+  which was noise on PRs that update a docstring next to a fix (seen on 2 of 5
+  kornia pull requests replayed through proofcheck). The summary counts code
+  hunks: "1/1 changed code hunk is required by the evidence (1
+  comment/docstring-only)". result.json and the card's data block gain a
+  `docs_only` count.
+
 ## [1.0.0] - 2026-10-14
 
 Published on PyPI as **`proofcheck-ai`** (`pip install proofcheck-ai`), because the name
