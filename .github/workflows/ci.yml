@@ -54,7 +54,7 @@ jobs:
       - name: Check the sdist contents
         run: |
           set -euo pipefail
-          tar tzf "$RUNNER_TEMP"/dist/proofcheck-*.tar.gz > "$RUNNER_TEMP/sdist.txt"
+          tar tzf "$RUNNER_TEMP"/dist/*.tar.gz > "$RUNNER_TEMP/sdist.txt"
           for f in LICENSE README.md pyproject.toml src/proofcheck/cli.py src/proofcheck/carddata.py \
                    src/proofcheck/unittest_junit.py src/proofcheck/agent/verify.py; do
             grep -q "/$f\$" "$RUNNER_TEMP/sdist.txt" || { echo "::error::sdist lacks $f"; exit 1; }

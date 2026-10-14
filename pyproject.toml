@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "proofcheck"
+name = "proofcheck-ai"
 version = "1.0.0"
 description = "Evidence, not authorship: check whether a pull request actually does what it claims."
 readme = "README.md"

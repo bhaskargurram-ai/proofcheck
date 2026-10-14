@@ -11,9 +11,9 @@
 # PyPI credentials (one of):
 #   * repository secret PYPI_API_TOKEN: a PyPI API token. For the very first
 #     upload of a new project it has to be an "Entire account" token; after
-#     that, replace it with a token scoped to the proofcheck project;
+#     that, replace it with a token scoped to the proofcheck-ai project;
 #   * trusted publishing, no secret at all: on PyPI add a (pending) trusted
-#     publisher with owner `bhaskargurram-ai`, repository `proofcheck`, workflow
+#     publisher for the proofcheck-ai project with owner `bhaskargurram-ai`, repository `proofcheck`, workflow
 #     `release.yml`, environment `pypi`, and delete the secret.
 # The publish job uses the token when the secret is set, trusted publishing
 # otherwise. The GitHub release does not depend on PyPI.
@@ -152,7 +152,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: pypi
-      url: https://pypi.org/project/proofcheck/
+      url: https://pypi.org/project/proofcheck-ai/
     permissions:
       id-token: write   # trusted publishing (OIDC), used when PYPI_API_TOKEN is not set
     steps:

@@ -12,7 +12,7 @@
   <a href="https://github.com/bhaskargurram-ai/proofcheck/actions/workflows/ci.yml"><img src="https://github.com/bhaskargurram-ai/proofcheck/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://github.com/bhaskargurram-ai/proofcheck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10 to 3.13">
-  <img src="https://img.shields.io/badge/version-1.0.0-informational" alt="Version 1.0.0">
+  <a href="https://pypi.org/project/proofcheck-ai/"><img src="https://img.shields.io/pypi/v/proofcheck-ai" alt="PyPI: proofcheck-ai"></a>
   <img src="https://img.shields.io/badge/agent-experimental-orange" alt="Agent: experimental">
 </p>
 
@@ -81,7 +81,7 @@ A good human PR and a good AI-assisted PR both pass. A sloppy PR from either sou
 ### 1. Install
 
 ```bash
-pip install proofcheck                # once 1.0.0 is published to PyPI
+pip install proofcheck-ai             # the command and the import are `proofcheck`
 # or, straight from GitHub:
 pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v1.0.0"
 ```
