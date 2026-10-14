@@ -222,5 +222,20 @@ class WorkflowSecurityTest(unittest.TestCase):
         self.assertEqual(conditions, commands)
 
 
+class RefDefaultsTest(unittest.TestCase):
+    def test_reusable_workflows_default_to_this_release(self):
+        """A caller that omits `proofcheck-ref` must install the release its `@ref` names, not an older one."""
+        import proofcheck
+
+        want = f"v{proofcheck.__version__}"
+        seen = 0
+        for path in sorted(WF_DIR.glob("*.yml")):
+            inputs = ((load(path).get("on") or {}).get("workflow_call") or {}).get("inputs") or {}
+            if "proofcheck-ref" in inputs:
+                seen += 1
+                self.assertEqual(inputs["proofcheck-ref"].get("default"), want, path.name)
+        self.assertGreater(seen, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
