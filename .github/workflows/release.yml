@@ -78,7 +78,9 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   github-release:
-    needs: publish
+    # Not gated on the PyPI publish: the GitHub release (with the built files)
+    # exists even before the one-time PyPI trusted-publisher setup is done.
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
