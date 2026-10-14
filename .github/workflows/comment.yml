@@ -22,7 +22,7 @@ on:
       proofcheck-ref:
         description: Tag or commit SHA of proofcheck to install (keep it equal to the @ref of this workflow).
         type: string
-        default: v1.0.0
+        default: v1.0.1
       proofcheck-repository:
         description: Repository proofcheck is installed from.
         type: string
