@@ -379,7 +379,9 @@ class OnlineRunner:
         branches = list(dict.fromkeys(self.leftover_branches))
         if self.git is not None:
             try:
-                self.git("push", "-q", "origin", "--delete", *branches)
+                # push.negotiate (set globally on some machines) fails a delete-only push:
+                # there are no commits to negotiate, so turn it off for this push.
+                self.git("-c", "push.negotiate=false", "push", "-q", "origin", "--delete", *branches)
                 self.log(f"deleted {len(branches)} branch(es) with git push --delete after the API refused")
                 return
             except GitError as exc:

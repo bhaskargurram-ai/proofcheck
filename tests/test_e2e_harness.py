@@ -787,3 +787,32 @@ class CLITest(TempDirCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeftoverBranchesTest(unittest.TestCase):
+    """The git fallback for refused branch deletes."""
+
+    def _harness(self, git):
+        h = harness.OnlineRunner.__new__(harness.OnlineRunner)
+        h.leftover_branches = ["proofcheck-e2e/a-1", "proofcheck-e2e/a-base-1", "proofcheck-e2e/a-1"]
+        h.git = git
+        h.report = harness.Report(mode="online", scenario_set="t", started="now")
+        h.log = harness.Log(quiet=True)
+        return h
+
+    def test_delete_push_turns_off_push_negotiation(self):
+        calls = []
+        h = self._harness(lambda *args, **kw: calls.append(args) or "")
+        h._delete_leftover_branches()
+        # push.negotiate=true (a common global setting) fails a delete-only push
+        self.assertEqual(calls, [("-c", "push.negotiate=false", "push", "-q", "origin", "--delete",
+                                  "proofcheck-e2e/a-1", "proofcheck-e2e/a-base-1")])
+        self.assertEqual(h.report.notes, [])
+
+    def test_refused_git_delete_is_reported_with_the_command(self):
+        def refuse(*args, **kw):
+            raise harness.GitError("HTTP 403")
+        h = self._harness(refuse)
+        h._delete_leftover_branches()
+        (note,) = h.report.notes
+        self.assertIn("git push origin --delete proofcheck-e2e/a-1 proofcheck-e2e/a-base-1", note)
