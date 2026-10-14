@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,15 +7,15 @@ name = "proofcheck"
 version = "1.0.0"
 description = "Evidence, not authorship: check whether a pull request actually does what it claims."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Bhaskar Gurram", email = "gurrambhaskar.ai@gmail.com" }]
 requires-python = ">=3.10"
 keywords = ["github-action", "pull-request", "code-review", "testing", "fail-to-pass", "maintainers"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -31,6 +31,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pyyaml>=6"]
+
+[project.urls]
+Homepage = "https://github.com/bhaskargurram-ai/proofcheck"
+Documentation = "https://github.com/bhaskargurram-ai/proofcheck#readme"
+Changelog = "https://github.com/bhaskargurram-ai/proofcheck/blob/main/CHANGELOG.md"
+Issues = "https://github.com/bhaskargurram-ai/proofcheck/issues"
 
 [project.scripts]
 proofcheck = "proofcheck.cli:main"
