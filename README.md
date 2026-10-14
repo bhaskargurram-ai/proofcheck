@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="proofcheck: Evidence, not authorship." width="880">
+  <img src="https://raw.githubusercontent.com/bhaskargurram-ai/proofcheck/main/docs/assets/banner.svg" alt="proofcheck: Evidence, not authorship." width="880">
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/bhaskargurram-ai/proofcheck/actions/workflows/ci.yml"><img src="https://github.com/bhaskargurram-ai/proofcheck/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <a href="https://github.com/bhaskargurram-ai/proofcheck/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10 to 3.13">
   <img src="https://img.shields.io/badge/version-1.0.0-informational" alt="Version 1.0.0">
   <img src="https://img.shields.io/badge/agent-experimental-orange" alt="Agent: experimental">
@@ -19,7 +19,7 @@
 It makes no attempt to guess whether a human or an AI wrote the code. It only looks at evidence.
 
 <p align="center">
-  <img src="docs/images/proof-card.png" alt="proofcheck 0.2 on one of its own pull requests: 'fixes #1' verified by 5 tests that fail on the base commit and pass on the PR head, plus the issue's reproducer; 'backwards compatible' marked as no evidence; the diff evidence map shows all 6 changed hunks are required by specific tests." width="760">
+  <img src="https://raw.githubusercontent.com/bhaskargurram-ai/proofcheck/main/docs/images/proof-card.png" alt="proofcheck 0.2 on one of its own pull requests: 'fixes #1' verified by 5 tests that fail on the base commit and pass on the PR head, plus the issue's reproducer; 'backwards compatible' marked as no evidence; the diff evidence map shows all 6 changed hunks are required by specific tests." width="760">
   <br><sub>A real card: proofcheck 0.2 run on one of its own pull requests (#2). Running it there also caught a bug in proofcheck itself: quoted example phrases in the description were being counted as claims.</sub>
 </p>
 
@@ -58,13 +58,13 @@ proofcheck asks the questions a careful reviewer asks first:
 A good human PR and a good AI-assisted PR both pass. A sloppy PR from either source gets a card that shows exactly what is missing. ⚠️ means **no evidence**, not **wrong**.
 
 <p align="center">
-  <img src="docs/assets/evidence-ladder.svg" alt="The evidence ladder from strongest to weakest: the PR's own test fails on base and passes on head; the issue's reproducer behaves differently on head; an agent-written test fails on base and passes on head; a changed hunk is required by that evidence. Below the line, no evidence: the changed test passes on both, or there are no tests or reproducers." width="880">
+  <img src="https://raw.githubusercontent.com/bhaskargurram-ai/proofcheck/main/docs/assets/evidence-ladder.svg" alt="The evidence ladder from strongest to weakest: the PR's own test fails on base and passes on head; the issue's reproducer behaves differently on head; an agent-written test fails on base and passes on head; a changed hunk is required by that evidence. Below the line, no evidence: the changed test passes on both, or there are no tests or reproducers." width="880">
 </p>
 
 ## How it works
 
 <p align="center">
-  <img src="docs/assets/how-it-works.svg" alt="Pipeline: a pull request's description, diff and linked issue feed four evidence sources (changed tests on base and head, issue reproducer replay, diff evidence map, and an opt-in agent reproduction test). Claims parsed from the description are matched to that evidence, and the result is posted as one proof card comment with a label: verified, partial, contradicted or no evidence." width="880">
+  <img src="https://raw.githubusercontent.com/bhaskargurram-ai/proofcheck/main/docs/assets/how-it-works.svg" alt="Pipeline: a pull request's description, diff and linked issue feed four evidence sources (changed tests on base and head, issue reproducer replay, diff evidence map, and an opt-in agent reproduction test). Claims parsed from the description are matched to that evidence, and the result is posted as one proof card comment with a label: verified, partial, contradicted or no evidence." width="880">
 </p>
 
 1. **Claims.** A rule-based extractor reads the PR title and description and finds claims such as `Fixes #12`, `adds tests` or `2x faster`. It ignores code blocks, quotes and unfilled templates. An optional LLM extractor can add claims, but never verdicts.
@@ -229,7 +229,7 @@ The demo uses pytest when it is installed and otherwise falls back to the stdlib
 <details>
 <summary><b>Use the composite action directly</b></summary>
 
-The `bhaskargurram-ai/proofcheck@v1.0.0` composite action is still available for custom setups. Its `command` input selects `context`, `run`, `summary`, `comment`, `agent-propose` or `agent-verify`. See [`action.yml`](action.yml) and the full examples in [`examples/workflows/`](examples/workflows). The reusable workflows above wrap the same steps and are the recommended setup.
+The `bhaskargurram-ai/proofcheck@v1.0.0` composite action is still available for custom setups. Its `command` input selects `context`, `run`, `summary`, `comment`, `agent-propose` or `agent-verify`. See [`action.yml`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/action.yml) and the full examples in [`examples/workflows/`](https://github.com/bhaskargurram-ai/proofcheck/tree/main/examples/workflows). The reusable workflows above wrap the same steps and are the recommended setup.
 
 </details>
 
@@ -244,7 +244,7 @@ The `bhaskargurram-ai/proofcheck@v1.0.0` composite action is still available for
 | **Diff evidence map** | Which changed hunks the evidence depends on. See [below](#diff-evidence-map). |
 | **Agent evidence** | Only when the agent ran: verdict, model, variants tried, cost, and the winning test. |
 | **Scope** | Changes to CI config, dependency manifests, binaries, very large diffs, and hunks no evidence depends on. |
-| **Data block** | Invisible: a `<!-- proofcheck:data {...} -->` comment at the end with the verdict, claim statuses and counts as JSON, for bots and the end-to-end harness. Read it with `proofcheck.carddata.parse_card_data`. See [docs/TESTING.md](docs/TESTING.md#the-cards-data-block). |
+| **Data block** | Invisible: a `<!-- proofcheck:data {...} -->` comment at the end with the verdict, claim statuses and counts as JSON, for bots and the end-to-end harness. Read it with `proofcheck.carddata.parse_card_data`. See [docs/TESTING.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/TESTING.md#the-cards-data-block). |
 
 <details>
 <summary><b>Fail-to-pass tests in detail</b></summary>
@@ -321,7 +321,7 @@ Each snippet is reported as `behavior_changed`, `unchanged` or `error`.
 <details>
 <summary><b>The two demo cards, in full</b></summary>
 
-This is real output of [`examples/demo`](examples/demo) (from proofcheck 0.1.0). The demo bug is that `word_count("hello  world")` returns 3. Two PRs claim to fix it.
+This is real output of [`examples/demo`](https://github.com/bhaskargurram-ai/proofcheck/tree/main/examples/demo) (from proofcheck 0.1.0). The demo bug is that `word_count("hello  world")` returns 3. Two PRs claim to fix it.
 
 **PR A: a real fix.** Its description says *"Fixes #1 … Adds a regression test. This is backwards compatible."*
 
@@ -378,7 +378,7 @@ The map runs only when there is at least one fail → pass test or behaviour-cha
 Many real PRs say "Fixes #123" but add no test, and many issues have no runnable reproducer. For exactly that case, proofcheck can ask an LLM to **write a reproduction test**, then run it on base and head itself. The agent is **off by default**.
 
 <p align="center">
-  <img src="docs/assets/agent-loop.svg" alt="The agent loop: a fixes #N claim with no evidence; localize code with read-only tools; three prompt variants (reproduce-issue, exercise-diff, mimic-existing-tests); static checks and import repair; then, in a separate job with no secrets, run each candidate on base and head. A fail to pass candidate marks the claim verified (agent test); anything else means no evidence found, never contradicted." width="880">
+  <img src="https://raw.githubusercontent.com/bhaskargurram-ai/proofcheck/main/docs/assets/agent-loop.svg" alt="The agent loop: a fixes #N claim with no evidence; localize code with read-only tools; three prompt variants (reproduce-issue, exercise-diff, mimic-existing-tests); static checks and import repair; then, in a separate job with no secrets, run each candidate on base and head. A fail to pass candidate marks the claim verified (agent test); anything else means no evidence found, never contradicted." width="880">
 </p>
 
 - **Propose** (`proofcheck agent propose`). The model gets read-only tools (`list_files`, `read_file`, `grep`, `get_diff`, `get_issue`, `list_tests`) implemented with git plumbing. It cannot write files, run code or reach the network; its only output is a schema-validated `submit_test` call. Several **different prompt variants** run (by default `reproduce-issue`, `exercise-diff`, `mimic-existing-tests`), because varied prompts find more reproductions than resampling one. Candidates must parse, contain a test function, live under `tests/proofcheck_agent/`, and import modules that exist at head; near-miss module names are repaired by edit distance.
@@ -396,16 +396,16 @@ Many real PRs say "Fixes #123" but add no test, and many issues have no runnable
 
 **Expect it to fail often.** Published research on generating issue-reproducing tests (Otter / Otter++, [arXiv:2502.05368](https://arxiv.org/abs/2502.05368); see also SWT-bench) reports fail-to-pass success on roughly **a third of issues** (about 31–37 %), at under $0.10 per issue in that setup. We have not benchmarked proofcheck's agent; its token use and cost are recorded on every card. When it succeeds, the card shows the test in a collapsible block: **commit it** to keep the evidence.
 
-**Projects and Rust.** In a repository with several `[[project]]` tables, the agent works in the project whose source the PR mainly changes, and runs its candidates there with that project's runner. For a cargo project it writes a Rust **integration test** (`<crate>/tests/proofcheck_agent_<variant>.rs`) in the crate with the most changed lines, using only the crate's **public API** (`use <crate>::...`); private items and inline `#[cfg(test)]` modules are out of reach, and a candidate that only fails on base because it does not compile there counts as weak evidence. Rust candidates have their own static checks (balanced brackets, a `#[test]` fn, no processes, network, `unsafe` or environment reads). See [docs/AGENT.md](docs/AGENT.md#rust-cargo-projects).
+**Projects and Rust.** In a repository with several `[[project]]` tables, the agent works in the project whose source the PR mainly changes, and runs its candidates there with that project's runner. For a cargo project it writes a Rust **integration test** (`<crate>/tests/proofcheck_agent_<variant>.rs`) in the crate with the most changed lines, using only the crate's **public API** (`use <crate>::...`); private items and inline `#[cfg(test)]` modules are out of reach, and a candidate that only fails on base because it does not compile there counts as weak evidence. Rust candidates have their own static checks (balanced brackets, a `#[test]` fn, no processes, network, `unsafe` or environment reads). See [docs/AGENT.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/AGENT.md#rust-cargo-projects).
 
-`proofcheck agent run` chains propose and verify with up to `agent.max_rounds` refinement rounds that feed execution output back to the model. Use it **only locally or in trusted contexts**: it runs untrusted code in the same process that holds the API key. In CI, the agent workflow keeps propose and verify in separate jobs. Details are in [docs/AGENT.md](docs/AGENT.md).
+`proofcheck agent run` chains propose and verify with up to `agent.max_rounds` refinement rounds that feed execution output back to the model. Use it **only locally or in trusted contexts**: it runs untrusted code in the same process that holds the API key. In CI, the agent workflow keeps propose and verify in separate jobs. Details are in [docs/AGENT.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/AGENT.md).
 
 ## Security model
 
 Running PR code safely is the core problem. proofcheck splits the work into three trust zones, connected only by artifacts:
 
 <p align="center">
-  <img src="docs/assets/security-model.svg" alt="Three trust zones. Zone 1, evidence job on pull_request: runs PR code, read-only token, no secrets. Zone 2, agent (opt-in): the propose job holds the LLM key but never executes code; the verify job runs candidates and PR code with no secrets on a separate VM. Zone 3, comment job on workflow_run: holds a write token, never checks out PR code, validates result.json and re-renders the card. No job both runs PR code and holds a secret or a write token." width="880">
+  <img src="https://raw.githubusercontent.com/bhaskargurram-ai/proofcheck/main/docs/assets/security-model.svg" alt="Three trust zones. Zone 1, evidence job on pull_request: runs PR code, read-only token, no secrets. Zone 2, agent (opt-in): the propose job holds the LLM key but never executes code; the verify job runs candidates and PR code with no secrets on a separate VM. Zone 3, comment job on workflow_run: holds a write token, never checks out PR code, validates result.json and re-renders the card. No job both runs PR code and holds a secret or a write token." width="880">
 </p>
 
 - **Untrusted code runs only in jobs without secrets.** The evidence job runs on `pull_request` with `contents: read`, `persist-credentials: false`, a scrubbed environment, timeouts, and config read from the **base** commit. The agent's verify job has no secrets either.
@@ -415,7 +415,7 @@ Running PR code safely is the core problem. proofcheck splits the work into thre
 - **All PR-derived text is escaped** on the card: HTML, @mentions, issue references, links, table pipes and control characters.
 - **Prompt injection.** The rule-based path has nothing to inject into. PR text, issue text and file contents reach an LLM only as delimited, untrusted data; the model has no write, exec or network tools; its output is schema-validated and can't produce a ❌, and generated code only runs in a job without secrets.
 
-proofcheck raises the bar for low-effort PRs. It is **not** a sandbox and not a defence against a determined attacker: a malicious PR can still tamper with its own evidence inside the unprivileged job. Read [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) for the full threat model.
+proofcheck raises the bar for low-effort PRs. It is **not** a sandbox and not a defence against a determined attacker: a malicious PR can still tamper with its own evidence inside the unprivileged job. Read [docs/SECURITY_MODEL.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/SECURITY_MODEL.md) for the full threat model.
 
 ## How proofcheck compares
 
@@ -605,7 +605,7 @@ No. Claim extraction, the test runs, issue replay and the diff evidence map are 
 <details>
 <summary><b>Can a malicious PR fake a good card?</b></summary>
 
-Partly. PR code runs in the evidence job, so it can tamper with its own results there. The comment workflow limits what a forged result can say (schema validation, re-rendering, head-SHA checks, harness-change warnings), but proofcheck is not a defence against a determined attacker. See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
+Partly. PR code runs in the evidence job, so it can tamper with its own results there. The comment workflow limits what a forged result can say (schema validation, re-rendering, head-SHA checks, harness-change warnings), but proofcheck is not a defence against a determined attacker. See [docs/SECURITY_MODEL.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/SECURITY_MODEL.md).
 
 </details>
 
@@ -646,15 +646,15 @@ Python first: pytest (most complete) and stdlib `unittest`. Jest is experimental
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
+Contributions are welcome. See [CONTRIBUTING.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/CONTRIBUTING.md). In short:
 
 ```bash
 pip install -e ".[dev]"
 python -m pytest            # or, without pytest: python -m unittest discover -s tests
 ```
 
-The test suite builds real throwaway git repositories and worktrees, so it needs `git` on `PATH`. [docs/TESTING.md](docs/TESTING.md) describes every test level, including the packaging check and the end-to-end harness in [`e2e/`](e2e/README.md) that opens real pull requests against a test repository. Please report security issues privately through the repository's security advisory form rather than in a public issue.
+The test suite builds real throwaway git repositories and worktrees, so it needs `git` on `PATH`. [docs/TESTING.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/TESTING.md) describes every test level, including the packaging check and the end-to-end harness in [`e2e/`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/e2e/README.md) that opens real pull requests against a test repository. Please report security issues privately through the repository's security advisory form rather than in a public issue.
 
 ## License
 
-[MIT](LICENSE) © 2026 Bhaskar Gurram
+[MIT](https://github.com/bhaskargurram-ai/proofcheck/blob/main/LICENSE) © 2026 Bhaskar Gurram
