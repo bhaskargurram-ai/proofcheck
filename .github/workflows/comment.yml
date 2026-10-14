@@ -1,0 +1,144 @@
+# proofcheck reusable workflow: post the proof card (PRIVILEGED zone).
+#
+# Call it from a workflow triggered by `workflow_run` of the evidence workflow
+# (see `proofcheck init` or examples/workflows/proofcheck-comment.yml), and
+# from the agent workflow after its verify job.
+#
+# This job holds a token that can write PR comments and labels, so it NEVER
+# checks out, installs, builds or executes anything from the pull request.
+# It only:
+#   1. installs proofcheck from its own repository at `proofcheck-ref`;
+#   2. downloads the `proofcheck-result` artifact (produced next to PR code,
+#      so treated as hostile);
+#   3. validates the PR number, the result.json schema, and that the result
+#      and the PR's CURRENT head both match the commit of the triggering run;
+#   4. re-renders the card from the validated data (card.md is never posted),
+#      upserts one comment and sets a `proofcheck: <verdict>` label.
+name: proofcheck comment
+
+on:
+  workflow_call:
+    inputs:
+      proofcheck-ref:
+        description: Tag or commit SHA of proofcheck to install (keep it equal to the @ref of this workflow).
+        type: string
+        default: v1.0.0
+      proofcheck-repository:
+        description: Repository proofcheck is installed from.
+        type: string
+        default: bhaskargurram-ai/proofcheck
+      python-version:
+        type: string
+        default: "3.12"
+      labels:
+        description: "Set a `proofcheck: verified|partial|contradicted|no evidence` label (created if missing)."
+        type: boolean
+        default: true
+      pr-number:
+        description: >-
+          Trusted PR number, e.g. from a job output of a job that ran no PR code. Default: read from the
+          artifact (validated, and only accepted if that PR's head is the triggering run's commit).
+        type: string
+        default: ""
+      artifact-run-id:
+        description: "Run that uploaded `proofcheck-result`. Default: the triggering workflow_run."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  comment:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read          # download the artifact of the triggering run
+      pull-requests: write   # upsert the comment and the verdict label
+    steps:
+      - name: Find the result artifact
+        id: art
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.artifact-run-id || github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RUN_ID" =~ ^[0-9]{1,20}$ ]]; then echo "::error::invalid run id"; exit 1; fi
+          n="$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts?name=proofcheck-result" --jq '.total_count')"
+          if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt 0 ]; then found=true; else found=false; fi
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          [ "$found" = true ] || echo "No proofcheck-result artifact in run $RUN_ID; nothing to post."
+
+      - name: Check out proofcheck (trusted tool source; never the pull request)
+        if: steps.art.outputs.found == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.proofcheck-repository }}
+          ref: ${{ inputs.proofcheck-ref }}
+          path: .proofcheck-tool
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        if: steps.art.outputs.found == 'true'
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install proofcheck (isolated virtualenv)
+        if: steps.art.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/proofcheck-venv"
+          "$RUNNER_TEMP/proofcheck-venv/bin/python" -m pip install --quiet --disable-pip-version-check ./.proofcheck-tool
+          echo "PROOFCHECK_BIN=$RUNNER_TEMP/proofcheck-venv/bin/proofcheck" >> "$GITHUB_ENV"
+
+      - name: Download result artifact
+        if: steps.art.outputs.found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: proofcheck-result
+          path: ${{ runner.temp }}/proofcheck-artifact
+          run-id: ${{ steps.art.outputs.run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Validate PR number and head commit
+        if: steps.art.outputs.found == 'true'
+        id: pr
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/proofcheck-artifact
+          INPUT_PR: ${{ inputs.pr-number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_PR" ]; then
+            pr="$INPUT_PR"
+          else
+            pr="$(head -c 20 "$ARTIFACT_DIR/pr_number" | tr -d '[:space:]')"
+          fi
+          if ! [[ "$pr" =~ ^[0-9]{1,10}$ ]]; then
+            echo "::error::invalid PR number"; exit 1
+          fi
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::invalid head SHA of the triggering run"; exit 1
+          fi
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      # `--expect-head-sha` makes the CLI refuse unless result.json AND the PR's
+      # current head (read from the API) match the commit the triggering run tested.
+      - name: Post or update the proof card
+        if: steps.art.outputs.found == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RESULT: ${{ runner.temp }}/proofcheck-artifact/result.json
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
+          LABELS: ${{ inputs.labels }}
+        run: |
+          set -euo pipefail
+          args=(comment --json "$RESULT" --pr "$PR_NUMBER" --expect-head-sha "$HEAD_SHA")
+          if [ "$LABELS" = "true" ]; then args+=(--labels); fi
+          "$PROOFCHECK_BIN" "${args[@]}"

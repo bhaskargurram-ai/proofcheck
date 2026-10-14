@@ -1,0 +1,16 @@
+description = """Claims "no behaviour change" while changing slugify's output (and the tests' expectations).
+The base versions of the modified tests fail on head, and the changed tests go fail → pass:
+the claim must be contradicted."""
+title = "Refactor slugify (no behaviour change)"
+body = """
+Simplifies `slugify` and moves the separator into a module constant.
+This is a pure refactor: no behaviour change.
+"""
+
+[expected]
+verdict = "contradicted"
+label = "proofcheck: contradicted"
+min_fail_to_pass = 1
+max_fail_on_head = 0
+agent_status = ["none"]
+claims = [{ type = "no_behavior_change", status = "contradicted" }]

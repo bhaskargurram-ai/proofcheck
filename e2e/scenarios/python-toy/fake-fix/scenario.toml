@@ -1,0 +1,22 @@
+description = """A "fix" that does not fix anything, with a test that passes on base too (pass → pass):
+proofcheck must not call it verified."""
+title = "Fix clamp upper bound"
+body = """
+Fixes #{issue}: values above the upper bound are now handled.
+"""
+
+[issue]
+title = "clamp ignores the upper bound"
+
+[expected]
+verdict = "no_evidence"
+label = "proofcheck: no evidence"
+tests_status = "no_evidence"
+max_fail_to_pass = 0
+min_pass_to_pass = 1
+max_fail_on_head = 0
+# The agent may run (the fixes-claim is unverified) but cannot find honest
+# fail-to-pass evidence: the bug is still there on head.
+agent_status = ["none", "no_evidence", "inconclusive", "weak_evidence", "error"]
+claim_count = 1
+claims = [{ type = "fixes_issue", status = "unverified" }]

@@ -69,6 +69,8 @@ class Claim:
 _FENCE_RE = re.compile(r"(^|\n)(```|~~~)[^\n]*\n.*?(\n\2[^\n]*(?=\n|$)|$)", re.S)
 _HTML_COMMENT_RE = re.compile(r"<!--.*?(-->|$)", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+# Short double-quoted spans are mentions ('recognises "3x faster"'), not claims.
+_QUOTED_SPAN_RE = re.compile(r"\"[^\"\n]{1,120}\"|“[^”\n]{1,120}”")
 _QUOTE_LINE_RE = re.compile(r"^\s*>.*$", re.M)
 
 
@@ -109,8 +111,8 @@ def split_sentences(text: str) -> list[str]:
 
 
 def prose_of(sentence: str) -> str:
-    """The sentence with inline code spans blanked out (used for matching)."""
-    return _INLINE_CODE_RE.sub(" ", sentence)
+    """The sentence with inline code and quoted spans blanked out (used for matching)."""
+    return _QUOTED_SPAN_RE.sub(" ", _INLINE_CODE_RE.sub(" ", sentence))
 
 
 def display_of(sentence: str) -> str:
@@ -134,6 +136,8 @@ _SINGLE_REF_RE = re.compile(
 def _issue_claims(sentence: str) -> list[Claim]:
     claims = []
     for m in _ISSUE_RE.finditer(sentence):
+        if _negated(sentence, m.start()):
+            continue  # "does not fix #3" is not a claim to fix #3
         keyword = m.group(0).split()[0].rstrip(":").lower()
         for ref in _SINGLE_REF_RE.finditer(m.group("refs")):
             repo = ref.group("repo") or ref.group("urepo") or None
@@ -169,6 +173,8 @@ _PERF_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("factor_speed", re.compile(rf"(?<![\w.]){_NUM}{_X}\s+(?:an?\s+)?{_SPEED_WORDS}", re.I)),
     # "speedup of 3x", "faster by ~2x", "a 4x speed-up"
     ("factor_speed", re.compile(rf"(?:speed-?up|faster)\s+(?:of|by)?\s*(?:~|about\s+|roughly\s+|around\s+|up to\s+)?{_NUM}{_X}(?![\w])", re.I)),
+    # "speeds up parsing by 2.5x", "sped up the build by ~3x"
+    ("factor_speed", re.compile(rf"\b(?:speeds?|sped)[- ]up\s+(?:[\w.-]+\s+){{0,3}}?by\s+(?:~|about\s+|roughly\s+|around\s+|up to\s+)?{_NUM}{_X}(?![\w])", re.I)),
     # "3x less memory", "2x lower memory"
     ("factor_memory", re.compile(rf"(?<![\w.]){_NUM}{_X}\s+{_MEM_WORDS}", re.I)),
     # "40% faster", "25 % speedup"
@@ -183,6 +189,8 @@ _PERF_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         re.I)),
     # "from 162 s to 0.22 s", "from 3.2 GB to 1 GB"
     ("from_to", re.compile(rf"\bfrom\s+(?:~|about\s+)?{_NUM}\s*{_UNIT_RE}\s+(?:down\s+)?to\s+(?:~|about\s+)?{_NUM}\s*{_UNIT_RE}", re.I)),
+    # "15.5 s → 0.28 s", "162s -> 0.22s", "3.2 GB => 1 GB"
+    ("from_to", re.compile(rf"(?<![\w.]){_NUM}\s*{_UNIT_RE}\s*(?:→|->|=>|⟶)\s*{_NUM}\s*{_UNIT_RE}", re.I)),
 ]
 
 
@@ -239,7 +247,8 @@ def _perf_claims(sentence: str) -> list[Claim]:
 
 # --------------------------------------------------------------------------- simple phrase claims
 
-_NEGATION_BEFORE = re.compile(r"\b(?:not|n't|no longer|never|isn't|aren't|without)\s+(?:\w+\s+){0,2}$", re.I)
+# "n't" sits inside a word ("doesn't"), so it must not require a leading word boundary.
+_NEGATION_BEFORE = re.compile(r"(?:\b(?:not|no longer|never|without)|n[’']t)\s+(?:\w+\s+){0,2}$", re.I)
 
 _NO_BEHAVIOR_RE = re.compile(
     r"\b(?:no (?:functional|behaviou?ral|behaviou?r|logic|semantic|user[- ]facing|runtime) changes?"

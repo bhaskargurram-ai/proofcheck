@@ -37,6 +37,12 @@ class TestOutcome:
     outcome: str
     message: str = ""
     file: str = ""
+    #: Tail of the failure/error body (traceback). Used to tell assertion
+    #: failures from import errors when the message alone is not enough.
+    detail: str = ""
+    #: For pseudo-tests that stand for a whole test module/target: why it
+    #: produced no tests ("build" = it does not compile). Empty otherwise.
+    kind: str = ""
 
 
 def test_id_for(classname: str, name: str) -> str:
@@ -66,15 +72,18 @@ def parse_junit_string(text: str | bytes) -> dict[str, TestOutcome]:
             continue
         outcome = PASSED
         message = ""
+        detail = ""
         for child in case:
             tag = child.tag
             if tag in (FAILED, "failure"):
                 outcome, message = FAILED, child.get("message") or (child.text or "")
+                detail = (child.text or "").strip()[-2000:]
             elif tag == ERROR:
                 outcome, message = ERROR, child.get("message") or (child.text or "")
+                detail = (child.text or "").strip()[-2000:]
             elif tag == SKIPPED and outcome == PASSED:
                 outcome, message = SKIPPED, child.get("message") or ""
-        new = TestOutcome(tid, outcome, message.strip()[:2000], case.get("file", ""))
+        new = TestOutcome(tid, outcome, message.strip()[:2000], case.get("file", ""), detail)
         old = results.get(tid)
         if old is None or _RANK[new.outcome] > _RANK[old.outcome]:
             results[tid] = new

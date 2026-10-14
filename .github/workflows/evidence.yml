@@ -1,0 +1,193 @@
+# proofcheck reusable workflow: gather evidence (UNPRIVILEGED zone).
+#
+# Call it from a workflow triggered by `pull_request` (see `proofcheck init`
+# or examples/workflows/proofcheck.yml):
+#
+#   jobs:
+#     evidence:
+#       uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0
+#       with:
+#         proofcheck-ref: v1.0.0
+#
+# Untrusted PR code (install hooks, tests, issue reproducers) runs in this job,
+# so it gets a read-only token and no secrets (for fork PRs GitHub enforces
+# that). proofcheck itself is installed from its own repository at
+# `proofcheck-ref` into an isolated virtualenv BEFORE any PR code runs; the
+# only step that sees a token (`context`, read-only) also runs before that.
+# The result is uploaded as the `proofcheck-result` artifact and rendered into
+# the job summary; the privileged comment workflow (comment.yml) posts it.
+#
+# Never call this workflow from `pull_request_target` or `workflow_run`: it
+# executes the pull request's code. The job refuses to run for other events.
+name: proofcheck evidence
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python used for proofcheck and for the project's tests.
+        type: string
+        default: "3.12"
+      node-version:
+        description: Set (e.g. "20") to install Node.js for jest projects.
+        type: string
+        default: ""
+      install-command:
+        description: Shell command that installs the project under test (runs PR code). May be empty (e.g. Rust-only repositories).
+        type: string
+        default: 'pip install -e ".[dev]" || pip install -e .'
+      proofcheck-ref:
+        description: Tag or commit SHA of proofcheck to install (keep it equal to the @ref of this workflow).
+        type: string
+        default: v1.0.0
+      proofcheck-repository:
+        description: Repository proofcheck is installed from.
+        type: string
+        default: bhaskargurram-ai/proofcheck
+      fail-on:
+        description: "never | contradicted | no-evidence: fail the check for this verdict or worse."
+        type: string
+        default: never
+      ablation:
+        description: Build the diff evidence map (revert each changed hunk and re-run the evidence).
+        type: boolean
+        default: true
+      timeout-minutes:
+        description: >-
+          Job timeout. Rust workspaces compile the changed crates for the base, head and every ablated hunk;
+          use 60-120 for large workspaces.
+        type: number
+        default: 60
+    outputs:
+      verdict:
+        description: "evidence | partial | no_evidence | contradicted | error"
+        value: ${{ jobs.evidence.outputs.verdict }}
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    # Only ever for `pull_request`: no write token, no secrets for forks.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      issues: read   # `context` reads linked issues on private repositories (read-only)
+    outputs:
+      verdict: ${{ steps.run.outputs.verdict }}
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0              # proofcheck needs the base commit too
+          persist-credentials: false  # no token in .git/config for PR code to find
+
+      - name: Check out proofcheck (trusted tool source, independent of the PR)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.proofcheck-repository }}
+          ref: ${{ inputs.proofcheck-ref }}
+          path: .proofcheck-tool
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - uses: actions/setup-node@v4
+        if: inputs.node-version != ''
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install proofcheck (isolated virtualenv)
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/proofcheck-venv"
+          "$RUNNER_TEMP/proofcheck-venv/bin/python" -m pip install --quiet --disable-pip-version-check ./.proofcheck-tool
+          echo "PROOFCHECK_BIN=$RUNNER_TEMP/proofcheck-venv/bin/proofcheck" >> "$GITHUB_ENV"
+
+      # The only step with a token, and it runs before any PR code.
+      - name: Collect PR context (before any PR code runs)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p proofcheck-out
+          "$PROOFCHECK_BIN" context --out proofcheck-out/context.json
+
+      # Rust projects. rustup is preinstalled on ubuntu-latest; installing the
+      # toolchain that the PR's rust-toolchain.toml names is PR-controlled
+      # configuration, so this runs after the token step, like the install step.
+      - name: Set up Rust (honours rust-toolchain.toml; runs PR-controlled config)
+        if: hashFiles('**/Cargo.toml') != ''
+        run: |
+          set -euo pipefail
+          if [ -f rust-toolchain.toml ] || [ -f rust-toolchain ]; then
+            rustup toolchain install || rustup show active-toolchain
+          else
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustc --version
+          cargo --version
+          # One target directory for the base, head and ablation worktrees.
+          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
+          echo "CARGO_TERM_COLOR=never" >> "$GITHUB_ENV"
+
+      # Restores ~/.cargo and ./target. Only in this unprivileged pull_request
+      # job: its caches are scoped to the PR's ref, and no workflow_run job
+      # (comment, agent) ever restores a cache.
+      - name: Cache Rust dependencies (unprivileged pull_request job only)
+        if: hashFiles('**/Cargo.toml') != ''
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install the project under test (runs PR code)
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: |
+          set -euo pipefail
+          eval "$INSTALL_COMMAND"
+
+      - name: Run proofcheck (runs PR code; no token)
+        id: run
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FAIL_ON: ${{ inputs.fail-on }}
+          ABLATION: ${{ inputs.ablation }}
+        run: |
+          set -euo pipefail
+          args=(run --repo . --base "$BASE_SHA" --head "$HEAD_SHA" --context-file proofcheck-out/context.json
+                --out proofcheck-out/card.md --json proofcheck-out/result.json --fail-on "$FAIL_ON")
+          if [ "$ABLATION" = "true" ]; then args+=(--ablation); else args+=(--no-ablation); fi
+          status=0
+          "$PROOFCHECK_BIN" "${args[@]}" || status=$?
+          if [[ "$PR_NUMBER" =~ ^[0-9]{1,10}$ ]]; then echo "$PR_NUMBER" > proofcheck-out/pr_number; fi
+          if [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo "$HEAD_SHA" > proofcheck-out/head_sha; fi
+          if [ -f proofcheck-out/result.json ]; then
+            verdict="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["verdict"])' proofcheck-out/result.json)"
+            if [[ "$verdict" =~ ^[a-z_]{1,20}$ ]]; then echo "verdict=$verdict" >> "$GITHUB_OUTPUT"; fi
+          fi
+          exit "$status"
+
+      # Works for fork PRs too: no write token is needed for the job summary.
+      - name: Write the proof card to the job summary
+        if: always() && hashFiles('proofcheck-out/result.json') != ''
+        run: '"$PROOFCHECK_BIN" summary --json proofcheck-out/result.json'
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofcheck-result
+          path: |
+            proofcheck-out/result.json
+            proofcheck-out/card.md
+            proofcheck-out/pr_number
+            proofcheck-out/head_sha
+          if-no-files-found: ignore
+          retention-days: 7

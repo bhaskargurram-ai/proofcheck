@@ -25,7 +25,13 @@ TEST_STATUSES = ("evidence", "no_evidence", "fail_on_head", "no_tests", "error",
 TEST_CLASSES = ("fail_to_pass", "pass_to_pass", "fail_on_head", "error", "skipped")
 REPRO_STATUSES = ("reproduced_change", "unchanged", "no_snippets", "error", "not_found")
 SNIPPET_STATUSES = ("behavior_changed", "unchanged", "error")
-FLAG_KINDS = ("workflow", "dependency", "binary", "large_diff", "unmentioned")
+FLAG_KINDS = ("workflow", "dependency", "binary", "large_diff", "unmentioned", "unexercised")
+ABLATION_STATUSES = ("ran", "not_applicable", "no_hunks", "baseline_failed", "error")
+HUNK_STATUSES = ("required", "not_exercised", "skipped")
+HUNK_KINDS = ("modify", "add", "delete", "rename")
+BASE_FAILURE_KINDS = ("build",)
+RUNNER_NAMES = ("pytest", "unittest", "jest", "cargo")
+_PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
 
 MAX_STR = 2000
 MAX_ITEMS = 200
@@ -134,9 +140,24 @@ def _claim(v: Any, path: str) -> dict[str, Any]:
     }
 
 
+def _claim_with_source(v: Any, path: str) -> dict[str, Any]:
+    """A claim, plus the optional ``verified_by`` marker set when agent evidence verified it."""
+    out = _claim(v, path)
+    if isinstance(v, dict) and v.get("verified_by") is not None:
+        out["verified_by"] = _enum(v.get("verified_by"), ("agent",), f"{path}.verified_by")
+    return out
+
+
+def _agent(v: Any, path: str) -> dict[str, Any] | None:
+    """The optional ``agent`` section (agent-written reproduction tests)."""
+    from .agent.schema import validate_agent_section
+
+    return validate_agent_section(v, path)
+
+
 def _test(v: Any, path: str) -> dict[str, Any]:
     d = _dict(v, path)
-    return {
+    out = {
         "test_id": _str(d.get("test_id"), f"{path}.test_id", 500),
         "file": _str(d.get("file", ""), f"{path}.file", 500),
         "classification": _enum(d.get("classification"), TEST_CLASSES, f"{path}.classification"),
@@ -144,6 +165,27 @@ def _test(v: Any, path: str) -> dict[str, Any]:
         "head": _str(d.get("head", ""), f"{path}.head", 20),
         "touched": _bool(d.get("touched", True), f"{path}.touched"),
         "message": _str(d.get("message", ""), f"{path}.message", 500),
+    }
+    if d.get("base_failure_kind"):  # optional (v1.0): why a fail->pass test failed on base
+        out["base_failure_kind"] = _enum(d["base_failure_kind"], BASE_FAILURE_KINDS, f"{path}.base_failure_kind")
+    return out
+
+
+def _project(v: Any, path: str) -> dict[str, Any]:
+    """One entry of the optional ``tests.projects`` list (multi-project repositories)."""
+    d = _dict(v, path)
+    name = _str(d.get("name"), f"{path}.name", 40)
+    if not _PROJECT_NAME_RE.match(name or ""):
+        raise _err(f"{path}.name", "invalid project name")
+    counts_in = _dict(d.get("counts", {}), f"{path}.counts") or {}
+    return {
+        "name": name,
+        "path": _str(d.get("path", "."), f"{path}.path", 300),
+        "runner": _enum(d.get("runner"), RUNNER_NAMES, f"{path}.runner"),
+        "status": _enum(d.get("status"), TEST_STATUSES, f"{path}.status"),
+        "counts": {k: _int(counts_in.get(k, 0), f"{path}.counts.{k}", minimum=0) for k in TEST_CLASSES},
+        "base_run": _run(d.get("base_run"), f"{path}.base_run"),
+        "head_run": _run(d.get("head_run"), f"{path}.head_run"),
     }
 
 
@@ -177,7 +219,7 @@ def _tests(v: Any, path: str) -> dict[str, Any] | None:
             "failing": _list(old.get("failing"), f"{path}.old_tests_on_head.failing", lambda x, p: _str(x, p, 500), 50),
             "error": _str(old.get("error"), f"{path}.old_tests_on_head.error", optional=True),
         }
-    return {
+    out = {
         "status": _enum(d.get("status"), TEST_STATUSES, f"{path}.status"),
         "runner": _str(d.get("runner", ""), f"{path}.runner", 40),
         "test_files": _list(d.get("test_files"), f"{path}.test_files", lambda x, p: _str(x, p, 500)),
@@ -189,6 +231,9 @@ def _tests(v: Any, path: str) -> dict[str, Any] | None:
         "head_run": _run(d.get("head_run"), f"{path}.head_run"),
         "old_tests_on_head": old_out,
     }
+    if d.get("projects") is not None:  # optional (v1.0): per-project summaries
+        out["projects"] = _list(d.get("projects"), f"{path}.projects", _project, 20)
+    return out
 
 
 def _snippet_run(v: Any, path: str) -> dict[str, Any]:
@@ -277,6 +322,46 @@ def _scope(v: Any, path: str) -> dict[str, Any] | None:
     }
 
 
+def _hunk(v: Any, path: str) -> dict[str, Any]:
+    d = _dict(v, path)
+    return {
+        "file": _str(d.get("file"), f"{path}.file", 500),
+        "old_path": _str(d.get("old_path"), f"{path}.old_path", 500, optional=True),
+        "kind": _enum(d.get("kind", "modify"), HUNK_KINDS, f"{path}.kind"),
+        "location": _str(d.get("location", ""), f"{path}.location", 1100),
+        "start": _int(d.get("start", 0), f"{path}.start", minimum=0),
+        "end": _int(d.get("end", 0), f"{path}.end", minimum=0),
+        "added": _int(d.get("added", 0), f"{path}.added", minimum=0),
+        "removed": _int(d.get("removed", 0), f"{path}.removed", minimum=0),
+        "status": _enum(d.get("status"), HUNK_STATUSES, f"{path}.status"),
+        "broken_by": _list(d.get("broken_by"), f"{path}.broken_by", lambda x, p: _str(x, p, 500), 10),
+        "reason": _str(d.get("reason", ""), f"{path}.reason", 500),
+        "duration": _num(d.get("duration", 0), f"{path}.duration"),
+    }
+
+
+def _ablation(v: Any, path: str) -> dict[str, Any] | None:
+    d = _dict(v, path, optional=True)
+    if d is None:
+        return None
+    count = lambda k: _int(d.get(k, 0), f"{path}.{k}", minimum=0)  # noqa: E731
+    return {
+        "status": _enum(d.get("status"), ABLATION_STATUSES, f"{path}.status"),
+        "evidence": _list(d.get("evidence"), f"{path}.evidence", lambda x, p: _str(x, p, 500), 60),
+        "hunks": _list(d.get("hunks"), f"{path}.hunks", _hunk, 100),
+        "total_hunks": count("total_hunks"),
+        "tested": count("tested"),
+        "required": count("required"),
+        "not_exercised": count("not_exercised"),
+        "skipped": count("skipped"),
+        "untested_over_cap": count("untested_over_cap"),
+        "budget_s": _num(d.get("budget_s", 0), f"{path}.budget_s"),
+        "elapsed_s": _num(d.get("elapsed_s", 0), f"{path}.elapsed_s"),
+        "budget_exhausted": _bool(d.get("budget_exhausted", False), f"{path}.budget_exhausted"),
+        "notes": _list(d.get("notes"), f"{path}.notes", lambda x, p: _str(x, p, 500), 10),
+    }
+
+
 def validate_result(data: Any) -> dict[str, Any]:
     """Validate a result document and return a sanitized copy.
 
@@ -300,13 +385,15 @@ def validate_result(data: Any) -> dict[str, Any]:
         "head": _sha(d.get("head"), "$.head"),
         "merge_base": _sha(d.get("merge_base"), "$.merge_base", optional=True),
         "verdict": _enum(d.get("verdict"), VERDICTS, "$.verdict"),
-        "claims": _list(d.get("claims"), "$.claims", _claim, 50),
+        "claims": _list(d.get("claims"), "$.claims", _claim_with_source, 50),
         "tests": _tests(d.get("tests"), "$.tests"),
+        "agent": _agent(d.get("agent"), "$.agent"),
         "repro": _list(d.get("repro"), "$.repro", _repro, 10),
         "benchmark": _bench(d.get("benchmark"), "$.benchmark"),
         "scope": _scope(d.get("scope"), "$.scope"),
         "notes": _list(d.get("notes"), "$.notes", lambda x, p: _str(x, p, 1000), 20),
         "config_source": _str(d.get("config_source", ""), "$.config_source", 200),
+        "ablation": _ablation(d.get("ablation"), "$.ablation"),
     }
 
 

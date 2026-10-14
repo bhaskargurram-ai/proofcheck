@@ -11,7 +11,8 @@ A runner knows three things about an ecosystem:
    evidence).
 
 Built-in runners: ``pytest`` (default), ``unittest`` (stdlib; useful when
-pytest is not installed) and ``jest`` (experimental, via ``jest-junit``).
+pytest is not installed), ``jest`` (experimental, via ``jest-junit``) and
+``cargo`` (Rust; see :mod:`proofcheck.cargo`).
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from .junit import JUnitParseError, TestOutcome, parse_junit_file
 from .proc import CommandResult, default_python, run_command
@@ -76,6 +77,8 @@ class TestRunner:
     #: Test-related files that are runnable test modules.
     module_patterns: tuple[str, ...] = ()
     default_command: tuple[str, ...] = ()
+    #: Per-run timeout used when the configuration does not set one (None: the global default).
+    default_timeout: float | None = None
 
     def __init__(
         self,
@@ -117,6 +120,23 @@ class TestRunner:
         """True if ``test_id`` (from the JUnit report) comes from file ``path``."""
         return True
 
+    def test_regions(self, path: str, source: str) -> list[tuple[int, int]] | None:
+        """Line ranges (1-based, inclusive) of test code inside a *non-test* file.
+
+        Used by the diff evidence map to leave inline test code alone (Rust
+        ``#[cfg(test)]`` modules). ``None`` means the file could not be analysed.
+        """
+        return []
+
+    def inline_test_units(self, repo: str | Path, base: str, head: str, changed: Sequence[Any], subdir: str = ".") -> tuple[list[Any], list[str]]:
+        """Tests that live inside changed *source* files (Rust inline test modules).
+
+        Returns ``(units, notes)``; each unit has ``path`` (project-relative),
+        ``base_text`` (bytes written into the base worktree), ``touched`` and
+        ``modules``. Runners without inline tests return ``([], [])``.
+        """
+        return [], []
+
     # -- execution ---------------------------------------------------------------
     def build_command(self, test_files: Sequence[str], junit_path: str) -> list[str]:
         """Expand placeholders in the configured command."""
@@ -141,6 +161,11 @@ class TestRunner:
     def env_for(self, workdir: Path, junit_path: str) -> dict[str, str]:
         """Runner-specific environment additions."""
         return {}
+
+    def run_selected(self, workdir: Path, test_files: Sequence[str], test_ids: Sequence[str], env: Mapping[str, str],
+                     timeout: float) -> RunResult:
+        """Run (at least) ``test_ids`` from ``test_files``. The default runs the whole files."""
+        return self.run(workdir, test_files, env, timeout)
 
     def run(self, workdir: Path, test_files: Sequence[str], env: Mapping[str, str], timeout: float) -> RunResult:
         """Run ``test_files`` inside ``workdir`` and parse the JUnit report."""
@@ -343,6 +368,20 @@ RUNNERS: dict[str, type[TestRunner]] = {
     "jest": JestRunner,
 }
 
+#: Every runner name accepted in configuration and on the command line.
+RUNNER_NAMES = ("pytest", "unittest", "jest", "cargo")
+
+
+def _runner_class(name: str) -> type[TestRunner]:
+    if name == "cargo":
+        from .cargo import CargoRunner  # imported lazily: proofcheck.cargo imports this module
+
+        return CargoRunner
+    try:
+        return RUNNERS[name]
+    except KeyError:
+        raise ValueError(f"unknown runner {name!r}; choose one of {', '.join(sorted(RUNNER_NAMES))}") from None
+
 
 def get_runner(
     name: str,
@@ -350,13 +389,11 @@ def get_runner(
     test_patterns: Sequence[str] | None = None,
     module_patterns: Sequence[str] | None = None,
     extra_env: Mapping[str, str] | None = None,
+    **options: Any,
 ) -> TestRunner:
-    """Instantiate a runner by name."""
-    try:
-        cls = RUNNERS[name]
-    except KeyError:
-        raise ValueError(f"unknown runner {name!r}; choose one of {', '.join(sorted(RUNNERS))}") from None
-    return cls(command=command, test_patterns=test_patterns, module_patterns=module_patterns, extra_env=extra_env)
+    """Instantiate a runner by name. ``options`` are runner-specific (cargo: ``target_dir``)."""
+    cls = _runner_class(name)
+    return cls(command=command, test_patterns=test_patterns, module_patterns=module_patterns, extra_env=extra_env, **options)
 
 
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")

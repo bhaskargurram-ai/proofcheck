@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 484" width="1000" height="484" role="img" aria-labelledby="t d">
+  <title id="t">The evidence ladder, from strongest to weakest</title>
+  <desc id="d">Strongest: the PR's own test fails on base and passes on head (verified). Then: the issue's reproducer behaves differently on head (verified). Then: an agent-written test fails on base and passes on head (verified, agent test). Then: a changed hunk is required by that evidence (diff evidence map). Below the line, no evidence: the changed test passes on both base and head, and no tests or reproducers at all.</desc>
+  <style>
+    svg { --bg:#ffffff; --edge:#d1d9e0; --ink:#1f2328; --muted:#59636e; --box:#f6f8fa; --arrow:#818b98;
+          --pass:#1a7f37; --pass-bg:#dafbe1; --warn:#9a6700; --warn-bg:#fff8c5; --blue:#0969da; --blue-bg:#ddf4ff; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#151b23; --edge:#3d444d; --ink:#f0f6fc; --muted:#9198a1; --box:#1d242d; --arrow:#6e7781;
+            --pass:#3fb950; --pass-bg:#12301c; --warn:#d29922; --warn-bg:#3a2b0c; --blue:#4493f8; --blue-bg:#0f2a4a; }
+    }
+    text { font-family:-apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif; fill:var(--ink); }
+    .bg { fill:var(--bg); stroke:var(--edge); }
+    .row { fill:var(--box); stroke:var(--edge); stroke-width:1.1; }
+    .t { font-size:14.5px; font-weight:650; }
+    .s { font-size:12.5px; fill:var(--muted); }
+    .s-ok { fill:var(--pass); } .s-blue { fill:var(--blue); } .s-warn { fill:var(--warn); }
+    .c-ok { fill:var(--pass-bg); } .t-ok { fill:var(--pass); }
+    .c-blue { fill:var(--blue-bg); } .t-blue { fill:var(--blue); }
+    .c-warn { fill:var(--warn-bg); } .t-warn { fill:var(--warn); }
+    .chip { font-size:12.5px; font-weight:600; }
+    .axis { stroke:var(--arrow); stroke-width:2; }
+    .axh { fill:var(--arrow); }
+    .axt { font-size:12px; fill:var(--muted); font-weight:600; }
+    .div { stroke:var(--warn); stroke-width:1.3; stroke-dasharray:6 5; }
+    .pill { fill:var(--bg); stroke:var(--warn); }
+    .pt { font-size:12px; fill:var(--warn); font-weight:600; }
+  </style>
+
+  <rect class="bg" x="0.5" y="0.5" width="999" height="483" rx="14"/>
+
+  <!-- axis -->
+  <text class="axt" x="44" y="30" text-anchor="middle">stronger</text>
+  <line class="axis" x1="44" y1="42" x2="44" y2="440"/>
+  <path class="axh" d="M44 452 L37 438 L51 438 z"/>
+  <text class="axt" x="44" y="470" text-anchor="middle">weaker</text>
+
+  <!-- 1 -->
+  <rect class="row" x="80" y="40" width="900" height="56" rx="9"/>
+  <rect class="s-ok" x="80" y="40" width="6" height="56" rx="3"/>
+  <text class="t" x="104" y="63">The PR's own test fails on base and passes on head</text>
+  <text class="s" x="104" y="83">The test exercises exactly this change.</text>
+  <rect class="c-ok" x="808" y="56" width="156" height="24" rx="12"/>
+  <text class="chip t-ok" x="886" y="72.5" text-anchor="middle">verified</text>
+
+  <!-- 2 -->
+  <rect class="row" x="80" y="104" width="900" height="56" rx="9"/>
+  <rect class="s-ok" x="80" y="104" width="6" height="56" rx="3"/>
+  <text class="t" x="104" y="127">The issue's reproducer behaves differently on head</text>
+  <text class="s" x="104" y="147">The reported failure stops reproducing: exit code or output changes.</text>
+  <rect class="c-ok" x="808" y="120" width="156" height="24" rx="12"/>
+  <text class="chip t-ok" x="886" y="136.5" text-anchor="middle">verified</text>
+
+  <!-- 3 -->
+  <rect class="row" x="80" y="168" width="900" height="56" rx="9"/>
+  <rect class="s-ok" x="80" y="168" width="6" height="56" rx="3"/>
+  <text class="t" x="104" y="191">An agent-written test fails on base and passes on head</text>
+  <text class="s" x="104" y="211">Experimental. proofcheck ran it itself; commit the test to keep the evidence.</text>
+  <rect class="c-ok" x="808" y="184" width="156" height="24" rx="12"/>
+  <text class="chip t-ok" x="886" y="200.5" text-anchor="middle">verified (agent test)</text>
+
+  <!-- 4 -->
+  <rect class="row" x="80" y="232" width="900" height="56" rx="9"/>
+  <rect class="s-blue" x="80" y="232" width="6" height="56" rx="3"/>
+  <text class="t" x="104" y="255">A changed hunk is required by that evidence</text>
+  <text class="s" x="104" y="275">Undoing just this hunk makes a fail → pass test fail again.</text>
+  <rect class="c-blue" x="808" y="248" width="156" height="24" rx="12"/>
+  <text class="chip t-blue" x="886" y="264.5" text-anchor="middle">hunk required</text>
+
+  <!-- divider -->
+  <line class="div" x1="80" y1="312" x2="980" y2="312"/>
+  <rect class="pill" x="386" y="300" width="288" height="24" rx="12"/>
+  <text class="pt" x="530" y="316" text-anchor="middle">below this line: no evidence, not “wrong”</text>
+
+  <!-- 5 -->
+  <rect class="row" x="80" y="336" width="900" height="56" rx="9"/>
+  <rect class="s-warn" x="80" y="336" width="6" height="56" rx="3"/>
+  <text class="t" x="104" y="359">The changed test passes on base and on head</text>
+  <text class="s" x="104" y="379">It does not exercise the change, however plausible it looks.</text>
+  <rect class="c-warn" x="808" y="352" width="156" height="24" rx="12"/>
+  <text class="chip t-warn" x="886" y="368.5" text-anchor="middle">no evidence</text>
+
+  <!-- 6 -->
+  <rect class="row" x="80" y="400" width="900" height="56" rx="9"/>
+  <rect class="s-warn" x="80" y="400" width="6" height="56" rx="3"/>
+  <text class="t" x="104" y="423">No changed tests and no reproducer</text>
+  <text class="s" x="104" y="443">Nothing was measured, so the card says so.</text>
+  <rect class="c-warn" x="808" y="416" width="156" height="24" rx="12"/>
+  <text class="chip t-warn" x="886" y="432.5" text-anchor="middle">no evidence</text>
+</svg>

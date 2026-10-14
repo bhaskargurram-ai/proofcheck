@@ -21,6 +21,7 @@ Configuration (environment):
 * ``PROOFCHECK_LLM_API_KEY``: API key
 * ``PROOFCHECK_LLM_MODEL``: model name
 * ``PROOFCHECK_LLM_BASE_URL``: optional endpoint override
+* ``PROOFCHECK_LLM_REASONING_EFFORT``: optional, OpenAI-compatible only (e.g. ``none``)
 """
 
 from __future__ import annotations
@@ -132,6 +133,7 @@ class LLMClaimExtractor:
     model: str
     base_url: str = ""
     timeout: float = 60
+    reasoning_effort: str = ""  # PROOFCHECK_LLM_REASONING_EFFORT; OpenAI-compatible only
     transport: Transport = urllib_transport
 
     def _call(self, system: str, user: str) -> str:
@@ -144,8 +146,13 @@ class LLMClaimExtractor:
         elif self.provider == "openai":
             url = (self.base_url or "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
             headers["Authorization"] = f"Bearer {self.api_key}"
-            payload = {"model": self.model, "temperature": 0,
+            payload = {"model": self.model,
                        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+            # Reasoning models reject sampling parameters unless reasoning is off.
+            if self.reasoning_effort in ("", "none"):
+                payload["temperature"] = 0
+            if self.reasoning_effort:
+                payload["reasoning_effort"] = self.reasoning_effort
         else:
             raise LLMError(f"unknown LLM provider {self.provider!r}")
         resp = self.transport("POST", url, headers, json.dumps(payload).encode(), self.timeout)
@@ -173,4 +180,6 @@ def extractor_from_env(env: Mapping[str, str] | None = None, model: str = "", ba
     model = e.get("PROOFCHECK_LLM_MODEL") or model
     if not provider or not key or not model:
         return None
-    return LLMClaimExtractor(provider, key, model, e.get("PROOFCHECK_LLM_BASE_URL") or base_url, timeout)
+    effort = (e.get("PROOFCHECK_LLM_REASONING_EFFORT") or "").strip().lower()
+    return LLMClaimExtractor(provider, key, model, e.get("PROOFCHECK_LLM_BASE_URL") or base_url, timeout,
+                             reasoning_effort=effort if provider == "openai" else "")

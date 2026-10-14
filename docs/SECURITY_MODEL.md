@@ -7,12 +7,90 @@ threats that follow from that and what proofcheck does about each.
 
 The short version:
 
-1. Untrusted code runs **only** in an unprivileged `pull_request` workflow
-   with a read-only token and no secrets.
-2. The comment is posted by a separate `workflow_run` workflow that **never
+1. Untrusted code runs **only** in unprivileged jobs (the `pull_request`
+   evidence job and the agent's `verify` job) with a read-only token and no
+   secrets.
+2. The comment is posted by a separate `workflow_run` job that **never
    checks out or runs PR code**. It treats the artifact from step 1 as hostile.
-3. PR and issue text are **data**: escaped before rendering, and wrapped as
-   untrusted input when the optional LLM sees it.
+3. The optional agent's LLM key lives in a job that **reads the PR as data
+   but never installs or runs it**; the tests the agent writes run in a
+   different job (a different VM) that has no secrets.
+4. PR and issue text are **data**: escaped before rendering, and wrapped as
+   untrusted input when an LLM sees it.
+
+## Trust zones
+
+proofcheck's workflows are split into three zones. Each zone is one or more
+**jobs**; separate jobs run on separate, fresh virtual machines, so nothing
+one job's processes leave in memory or on disk is visible to another.
+
+| Zone | Jobs | Token | Secrets | PR code |
+|---|---|---|---|---|
+| **Unprivileged** (runs PR code) | `evidence.yml` › `evidence` (`pull_request`); `agent.yml` › `verify` | `contents: read` (+ `issues: read` for `evidence`, used before PR code runs) | **none** | **runs** (install, tests, reproducers, ablation, agent-written tests) |
+| **Key holder** (reads PR as data) | `agent.yml` › `propose` | `contents: read`, `issues: read`, `pull-requests: read` | the LLM API key | **never executed** |
+| **Privileged** (writes to the PR) | `comment.yml` › `comment`; `agent.yml` › `gate` (read-only API) | `pull-requests: write` (comment), `actions: read` | none | **never checked out** (`comment`, `gate`) |
+
+![Three trust zones](assets/security-model.svg)
+
+Rules that hold in every zone:
+
+- **No `pull_request_target`** anywhere (see below). Privileged work uses
+  `workflow_run`, which always runs the workflow files of the **default
+  branch**, so a PR cannot change the privileged workflows that act on it.
+- **proofcheck comes from a trusted source.** Each reusable workflow checks
+  out `bhaskargurram-ai/proofcheck` at `proofcheck-ref` into `.proofcheck-tool`
+  and installs it into a virtualenv under `$RUNNER_TEMP` **before** any PR
+  code runs. It is never installed from the PR (this repository's own
+  dogfooding evidence job is the exception: it tests the PR's version of the
+  tool, which is acceptable only because that job is unprivileged). Pin the
+  reusable workflows and `proofcheck-ref` to a release tag or, stricter, to a
+  full commit SHA.
+- **No script injection.** No `run:` script contains a `${{ }}` expression;
+  every value (inputs, event fields, step outputs) reaches scripts through
+  `env:` and is quoted. `tests/test_workflows.py` checks this and the
+  zone rules below on every test run.
+- **No credentials on disk.** Every `actions/checkout` sets
+  `persist-credentials: false`.
+- **No caches** in privileged jobs or in `workflow_run` jobs (a poisoned
+  cache could leak into a trusted job that restores it). The one exception is
+  `Swatinem/rust-cache` in the unprivileged `pull_request` evidence job, for
+  Rust projects: GitHub scopes caches saved by a `pull_request` run to that
+  pull request's merge ref, so a PR can only poison its own later evidence
+  runs (whose results are untrusted anyway), never the default branch or the
+  comment and agent workflows, which restore no cache. The Rust toolchain
+  named by the PR's `rust-toolchain.toml` is installed only after the token
+  step, like the project's own install command.
+
+### The agent (experimental, opt-in)
+
+`agent.yml` runs as three jobs after the evidence workflow completes:
+
+1. **`gate`** (no PR code, no checkout): downloads the evidence artifact,
+   reads the PR from the API, and continues only if the PR's current head is
+   the commit the evidence run tested, a `fixes #N` claim lacks proof (or
+   `when: always`), a key and model are configured, and the PR author is an
+   owner, member or collaborator **or** a maintainer added the
+   `proofcheck:agent` label (or the caller set `run-for: everyone`). This
+   stops strangers from spending your API credits.
+2. **`propose`** (holds the key): checks the PR out into `pr/` **as data**.
+   Nothing in it is installed, imported, built or executed; proofcheck's
+   outputs are written to `$RUNNER_TEMP`, outside the checkout, so files or
+   symlinks in the PR cannot redirect them. The model only gets read-only
+   tools implemented with git plumbing (`git show`, `git ls-tree`,
+   `git grep`), its only output is a schema-validated test file, and PR,
+   issue and file contents are passed as delimited untrusted data.
+3. **`verify`** (runs PR code): checks out the PR, installs the project and
+   runs each candidate test on base and head. **No secret is referenced** in
+   this job, its token is `contents: read`, and it uses no cache, so neither
+   the PR nor an LLM-written test can reach the key.
+
+The caller then runs `comment.yml` with the PR number from the `gate` job's
+output (computed from the API, not from an artifact written next to PR code)
+and the head SHA of the triggering evidence run.
+
+`proofcheck agent run` (propose and verify in one process) is for local use
+and trusted contexts only: there the key and the untrusted code share a
+process.
 
 ## Assets
 
@@ -171,8 +249,16 @@ against a determined attacker**, and it does not replace review. Treat ✅ as
 
 | Workflow | Permissions | Runs PR code? |
 |---|---|---|
-| `proofcheck.yml` (`pull_request`) | `contents: read`, `issues: read` | yes |
-| `proofcheck-comment.yml` (`workflow_run`) | `contents: read`, `pull-requests: write`, `actions: read` | **never** |
+| `proofcheck.yml` (`pull_request`) → `evidence.yml` | `contents: read`, `issues: read` | yes |
+| `proofcheck-comment.yml` (`workflow_run`) → `comment.yml` | `contents: read`, `pull-requests: write`, `actions: read` | **never** |
+| `proofcheck-agent.yml` (`workflow_run`) → `agent.yml` › `gate` | `contents: read`, `actions: read`, `pull-requests: read` | **never** |
+| `agent.yml` › `propose` | `contents: read`, `issues: read`, `pull-requests: read` + LLM key | **never** (data only) |
+| `agent.yml` › `verify` | `contents: read` | yes |
+| `proofcheck-agent.yml` › `comment` → `comment.yml` | `contents: read`, `pull-requests: write`, `actions: read` | **never** |
+
+Caller workflows set `permissions: {}` at the top and grant each job only
+what it needs; a reusable workflow can only narrow what its caller grants.
+`pull-requests: write` also covers creating and setting the verdict labels.
 
 - `issues: read` lets the `context` step read linked issues on private
   repositories; it is read-only and is used before any PR code runs. On public
@@ -180,7 +266,13 @@ against a determined attacker**, and it does not replace review. Treat ✅ as
   reads if the permission is removed.
 - Do not add secrets to `proofcheck.yml`. If you enable the LLM extractor,
   run extraction in a workflow that does not execute PR code, or accept that
-  PR code in the same job could read the key.
+  PR code in the same job could read the key. For the agent, use
+  `agent.yml`, which keeps the key out of every job that runs PR code.
+- **Residual risk inside an unprivileged job:** PR code can write to the
+  job's own `$GITHUB_OUTPUT`, `$GITHUB_ENV` and step summary, and to the
+  files it uploads. Consumers therefore never trust those: the comment job
+  re-validates the artifact, takes the head SHA from the `workflow_run` event
+  and (for the agent) the PR number from the `gate` job.
 
 ## Reporting a vulnerability
 

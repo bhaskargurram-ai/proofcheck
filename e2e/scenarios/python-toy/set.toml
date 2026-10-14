@@ -1,0 +1,8 @@
+description = """
+A tiny, self-contained Python package (`e2e_toy/`) with known bugs, and one
+pull request per proofcheck behaviour: a real fix, a fake fix, a smuggled
+hunk, a fix without a test (for the agent), a contradicted "no behaviour
+change" claim, a prompt-injection issue and a workflow-file change.
+"""
+# The harness refuses scenarios that touch anything else in the target repository.
+allowed_paths = ["e2e_toy/*", ".github/workflows/proofcheck-e2e-*.yml"]

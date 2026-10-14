@@ -76,6 +76,23 @@ class StubTransportTest(unittest.TestCase):
             self.assertNotIn("tools", payload)
             self.assertEqual(payload["temperature"], 0)
 
+    def test_reasoning_effort_and_temperature(self):
+        # GPT-6 models reject sampling parameters unless reasoning is off.
+        reply = json.dumps({"claims": []})
+        for effort, has_temperature in (("", True), ("none", True), ("low", False)):
+            transport, calls = self._transport(reply, "openai")
+            env = {"PROOFCHECK_LLM_PROVIDER": "openai", "PROOFCHECK_LLM_API_KEY": "k", "PROOFCHECK_LLM_MODEL": "m",
+                   "PROOFCHECK_LLM_REASONING_EFFORT": effort}
+            ex = extractor_from_env(env)
+            ex.transport = transport
+            ex.extract("t", "Fixes #12.")
+            payload = calls[0][3]
+            self.assertEqual("temperature" in payload, has_temperature, effort)
+            self.assertEqual(payload.get("reasoning_effort"), effort or None)
+        # never sent to Anthropic
+        env["PROOFCHECK_LLM_PROVIDER"] = "anthropic"
+        self.assertEqual(extractor_from_env(env).reasoning_effort, "")
+
     def test_extractor_from_env_is_off_by_default(self):
         self.assertIsNone(extractor_from_env({}))
         ex = extractor_from_env({"PROOFCHECK_LLM_PROVIDER": "openai", "PROOFCHECK_LLM_API_KEY": "k", "PROOFCHECK_LLM_MODEL": "m"})

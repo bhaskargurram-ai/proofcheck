@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 240" width="960" height="240" role="img" aria-labelledby="t d">
+  <title id="t">proofcheck: Evidence, not authorship.</title>
+  <desc id="d">The proofcheck wordmark next to a magnifying glass with a check mark in its lens, the tagline "Evidence, not authorship.", and a small ledger of three pull request claims: fixes #12 marked fail to pass, adds tests marked verified, and 2x faster marked no evidence.</desc>
+  <style>
+    svg { --bg:#ffffff; --edge:#d1d9e0; --ink:#1f2328; --muted:#59636e;
+          --pass:#1a7f37; --pass-bg:#dafbe1; --warn:#9a6700; --warn-bg:#fff8c5; --row:#f6f8fa; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#151b23; --edge:#3d444d; --ink:#f0f6fc; --muted:#9198a1;
+            --pass:#3fb950; --pass-bg:#12301c; --warn:#d29922; --warn-bg:#3a2b0c; --row:#1d242d; }
+    }
+    .bg { fill:var(--bg); stroke:var(--edge); }
+    .sans { font-family:-apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif; }
+    .mono { font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+    .word { fill:var(--ink); font-size:66px; font-weight:700; letter-spacing:-1.5px; }
+    .tag { fill:var(--muted); font-size:25px; }
+    .lens { fill:var(--pass-bg); stroke:var(--ink); stroke-width:9; }
+    .handle { stroke:var(--ink); stroke-width:15; stroke-linecap:round; }
+    .tick { fill:none; stroke:var(--pass); stroke-width:9; stroke-linecap:round; stroke-linejoin:round; }
+    .row { fill:var(--row); stroke:var(--edge); }
+    .claim { fill:var(--ink); font-size:14px; }
+    .chip-ok { fill:var(--pass-bg); } .chip-ok-t { fill:var(--pass); font-size:12.5px; font-weight:600; }
+    .chip-warn { fill:var(--warn-bg); } .chip-warn-t { fill:var(--warn); font-size:12.5px; font-weight:600; }
+  </style>
+
+  <rect class="bg" x="0.5" y="0.5" width="959" height="239" rx="16"/>
+
+  <!-- mark: a lens with a check, and a handle -->
+  <g transform="translate(52 52)">
+    <line class="handle" x1="98" y1="98" x2="128" y2="128"/>
+    <circle class="lens" cx="62" cy="62" r="50"/>
+    <polyline class="tick" points="38,64 55,81 87,46"/>
+  </g>
+
+  <text class="sans word" x="212" y="124">proofcheck</text>
+  <text class="sans tag" x="216" y="168">Evidence, not authorship.</text>
+
+  <!-- a tiny ledger of claims -->
+  <g class="sans" transform="translate(628 48)">
+    <rect class="row" x="0" y="0" width="290" height="40" rx="8"/>
+    <text class="mono claim" x="16" y="25">fixes #12</text>
+    <rect class="chip-ok" x="172" y="9" width="106" height="22" rx="11"/>
+    <text class="chip-ok-t" x="225" y="24.5" text-anchor="middle">fail → pass</text>
+
+    <rect class="row" x="0" y="52" width="290" height="40" rx="8"/>
+    <text class="mono claim" x="16" y="77">adds tests</text>
+    <rect class="chip-ok" x="172" y="61" width="106" height="22" rx="11"/>
+    <text class="chip-ok-t" x="225" y="76.5" text-anchor="middle">verified</text>
+
+    <rect class="row" x="0" y="104" width="290" height="40" rx="8"/>
+    <text class="mono claim" x="16" y="129">2× faster</text>
+    <rect class="chip-warn" x="172" y="113" width="106" height="22" rx="11"/>
+    <text class="chip-warn-t" x="225" y="128.5" text-anchor="middle">no evidence</text>
+  </g>
+</svg>
