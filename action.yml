@@ -108,7 +108,7 @@ inputs:
     required: false
     default: ""
   proofcheck-version:
-    description: "Advanced: pip requirement to install instead of this action's own source."
+    description: "Advanced: pip requirement to install instead of this action's own source, e.g. proofcheck-ai==1.0.0."
     required: false
     default: ""
 

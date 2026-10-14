@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.0.0] - 2026-10-14
 
+Published on PyPI as **`proofcheck-ai`** (`pip install proofcheck-ai`), because the name
+`proofcheck` is taken there. The command, the import (`import proofcheck`) and the
+GitHub repository keep the name `proofcheck`.
+
 0.2.0 was never released; its changes are part of 1.0.0.
 
 ### Added
