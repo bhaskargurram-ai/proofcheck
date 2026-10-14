@@ -95,7 +95,7 @@ def build_card_data(result: dict[str, Any], trusted_warnings: int = 0) -> dict[s
     ablation = result.get("ablation")
     if ablation:
         data["ablation"] = {"status": _text(ablation.get("status"), 20),
-                            **{k: _count(ablation.get(k)) for k in ("total_hunks", "tested", "required", "not_exercised", "skipped")}}
+                            **{k: _count(ablation.get(k)) for k in ("total_hunks", "tested", "required", "not_exercised", "skipped", "docs_only")}}
     else:
         data["ablation"] = None
     data["repro"] = [_text(s.get("status"), 20) for r in (result.get("repro") or [])[:10] for s in (r.get("snippets") or [])[:5]]

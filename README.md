@@ -83,7 +83,7 @@ A good human PR and a good AI-assisted PR both pass. A sloppy PR from either sou
 ```bash
 pip install proofcheck-ai             # the command and the import are `proofcheck`
 # or, straight from GitHub:
-pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v1.0.0"
+pip install "git+https://github.com/bhaskargurram-ai/proofcheck@v1.0.1"
 ```
 
 ### 2. Generate the workflows
@@ -98,7 +98,7 @@ proofcheck init            # add --agent to also set up the experimental agent
 
 ### 3. The workflows it writes
 
-proofcheck runs as separate workflows so that untrusted PR code and privileged tokens never share a job ([why](#security-model)). Each caller is a few lines that point at a reusable workflow in this repository. Pin `@v1.0.0`, or a full commit SHA if you want to be strict.
+proofcheck runs as separate workflows so that untrusted PR code and privileged tokens never share a job ([why](#security-model)). Each caller is a few lines that point at a reusable workflow in this repository. Pin `@v1.0.1`, or a full commit SHA if you want to be strict.
 
 **`.github/workflows/proofcheck.yml`** gathers evidence. It is unprivileged and is where PR code runs.
 
@@ -119,9 +119,9 @@ concurrency:
 
 jobs:
   evidence:
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.1
     with:
-      proofcheck-ref: v1.0.0
+      proofcheck-ref: v1.0.1
       python-version: "3.12"
       # Installs the project under test; this runs PR code (unprivileged job).
       install-command: 'pip install -e ".[dev]" pytest || pip install pytest'
@@ -147,9 +147,9 @@ jobs:
       contents: read
       actions: read          # download the artifact of the triggering run
       pull-requests: write   # upsert the comment and the verdict label
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.1
     with:
-      proofcheck-ref: v1.0.0
+      proofcheck-ref: v1.0.1
       labels: true
 ```
 
@@ -173,9 +173,9 @@ jobs:
       actions: read
       pull-requests: read
       issues: read
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v1.0.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/agent.yml@v1.0.1
     with:
-      proofcheck-ref: v1.0.0
+      proofcheck-ref: v1.0.1
       llm-provider: ${{ vars.PROOFCHECK_LLM_PROVIDER }}
       llm-model: ${{ vars.PROOFCHECK_LLM_MODEL }}
       llm-base-url: ${{ vars.PROOFCHECK_LLM_BASE_URL }}
@@ -193,9 +193,9 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.0
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.1
     with:
-      proofcheck-ref: v1.0.0
+      proofcheck-ref: v1.0.1
       # Trusted values: the PR number comes from the gate job (API data, no PR
       # code ran there) and the artifact from this run's verify job.
       pr-number: ${{ needs.agent.outputs.pr-number }}
@@ -229,7 +229,7 @@ The demo uses pytest when it is installed and otherwise falls back to the stdlib
 <details>
 <summary><b>Use the composite action directly</b></summary>
 
-The `bhaskargurram-ai/proofcheck@v1.0.0` composite action is still available for custom setups. Its `command` input selects `context`, `run`, `summary`, `comment`, `agent-propose` or `agent-verify`. See [`action.yml`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/action.yml) and the full examples in [`examples/workflows/`](https://github.com/bhaskargurram-ai/proofcheck/tree/main/examples/workflows). The reusable workflows above wrap the same steps and are the recommended setup.
+The `bhaskargurram-ai/proofcheck@v1.0.1` composite action is still available for custom setups. Its `command` input selects `context`, `run`, `summary`, `comment`, `agent-propose` or `agent-verify`. See [`action.yml`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/action.yml) and the full examples in [`examples/workflows/`](https://github.com/bhaskargurram-ai/proofcheck/tree/main/examples/workflows). The reusable workflows above wrap the same steps and are the recommended setup.
 
 </details>
 
@@ -369,7 +369,7 @@ For each hunk in the changed non-test files, proofcheck takes a fresh worktree o
 | **not exercised** | All evidence still passes without it. Nothing measured depends on this change. |
 | **skipped** | The hunk could not be reversed cleanly, or the time budget ran out. |
 
-The card shows a table of `file:lines`, status and which evidence broke, with a summary such as *"3/4 changed hunks are required by the tests"*. Unexercised hunks also get a ⚠️ scope note (*"changed, but no evidence depends on it"*). That is a useful way to spot unrelated changes riding along in a PR. It is not proof that they are wrong: refactors, logging and docs are often unexercised by design.
+The card shows a table of `file:lines`, status and which evidence broke, with a summary such as *"3/4 changed hunks are required by the tests"*. Unexercised hunks also get a ⚠️ scope note (*"changed, but no evidence depends on it"*). That is a useful way to spot unrelated changes riding along in a PR. It is not proof that they are wrong: refactors, logging and docs are often unexercised by design. In Python files, a hunk that changes only comments, docstrings or formatting (the code's syntax tree is the same without it) is marked 📝 *docs only*, is not run and gets no scope note.
 
 The map runs only when there is at least one fail → pass test or behaviour-changing reproducer, and is capped by `ablation.max_hunks` (default 12) and `ablation.time_budget_s` (default 300 s). Turn it off with `--no-ablation` or `[ablation] enabled = false`.
 
@@ -525,7 +525,7 @@ The optional LLM claim extractor sends PR text as untrusted data inside random d
 ## CLI reference
 
 ```text
-proofcheck init      [--repo .] [--agent] [--force] [--ref v1.0.0]
+proofcheck init      [--repo .] [--agent] [--force] [--ref v1.0.1]
 proofcheck context   --out context.json [--max-issues 5]
 proofcheck run       --base REF [--head HEAD] [--repo .] [options]
 proofcheck summary   --json result.json

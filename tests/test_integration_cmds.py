@@ -13,6 +13,7 @@ import _helpers  # noqa: F401
 
 from click.testing import CliRunner
 
+import proofcheck
 from proofcheck import cli
 from proofcheck.card import CARD_MARKER
 from proofcheck.ci import context_from_api, write_summary
@@ -282,9 +283,10 @@ class InitTest(unittest.TestCase):
 
     def test_examples_match_generated_callers(self):
         ex = _helpers.ROOT / "examples" / "workflows"
-        self.assertEqual((ex / "proofcheck.yml").read_text(), evidence_caller("v1.0.0", "pytest"))
-        self.assertEqual((ex / "proofcheck-comment.yml").read_text(), comment_caller("v1.0.0"))
-        self.assertEqual((ex / "proofcheck-agent.yml").read_text(), agent_caller("v1.0.0", "pytest"))
+        ref = f"v{proofcheck.__version__}"
+        self.assertEqual((ex / "proofcheck.yml").read_text(), evidence_caller(ref, "pytest"))
+        self.assertEqual((ex / "proofcheck-comment.yml").read_text(), comment_caller(ref))
+        self.assertEqual((ex / "proofcheck-agent.yml").read_text(), agent_caller(ref, "pytest"))
 
 
 if __name__ == "__main__":

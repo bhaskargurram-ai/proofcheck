@@ -35,7 +35,7 @@ class CardDataTest(unittest.TestCase):
         self.assertEqual(data["tests"]["fail_to_pass"], 1)
         self.assertEqual(data["tests"]["pass_to_pass"], 0)
         self.assertEqual(data["ablation"], {"status": "ran", "total_hunks": 3, "tested": 3, "required": 2,
-                                            "not_exercised": 1, "skipped": 0})
+                                            "not_exercised": 1, "skipped": 0, "docs_only": 0})
         self.assertIsNone(data["agent"])
         self.assertEqual(data["warnings"], 0)
         self.assertTrue(card.endswith(" -->\n"))

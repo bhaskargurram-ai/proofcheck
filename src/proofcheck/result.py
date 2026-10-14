@@ -27,7 +27,7 @@ REPRO_STATUSES = ("reproduced_change", "unchanged", "no_snippets", "error", "not
 SNIPPET_STATUSES = ("behavior_changed", "unchanged", "error")
 FLAG_KINDS = ("workflow", "dependency", "binary", "large_diff", "unmentioned", "unexercised")
 ABLATION_STATUSES = ("ran", "not_applicable", "no_hunks", "baseline_failed", "error")
-HUNK_STATUSES = ("required", "not_exercised", "skipped")
+HUNK_STATUSES = ("required", "not_exercised", "skipped", "docs_only")
 HUNK_KINDS = ("modify", "add", "delete", "rename")
 BASE_FAILURE_KINDS = ("build",)
 RUNNER_NAMES = ("pytest", "unittest", "jest", "cargo")
@@ -354,6 +354,7 @@ def _ablation(v: Any, path: str) -> dict[str, Any] | None:
         "required": count("required"),
         "not_exercised": count("not_exercised"),
         "skipped": count("skipped"),
+        "docs_only": count("docs_only"),
         "untested_over_cap": count("untested_over_cap"),
         "budget_s": _num(d.get("budget_s", 0), f"{path}.budget_s"),
         "elapsed_s": _num(d.get("elapsed_s", 0), f"{path}.elapsed_s"),
