@@ -11,8 +11,10 @@
 #      (Settings -> Environments); optionally require a reviewer and restrict
 #      it to tags matching `v*`.
 #   3. Bump the version in pyproject.toml and src/proofcheck/__init__.py, add a
-#      CHANGELOG.md section `## [X.Y.Z] - date`, commit, then
-#      `git tag vX.Y.Z && git push origin vX.Y.Z`.
+#      CHANGELOG.md section `## [X.Y.Z] - date`, commit, then either
+#      `git tag vX.Y.Z && git push origin vX.Y.Z`, or create the release on
+#      github.com with a new tag vX.Y.Z (this workflow then attaches the files).
+#      The GitHub release does not wait for PyPI, so it works before step 1.
 name: release
 
 on:
@@ -105,8 +107,15 @@ jobs:
           m = re.search(r"^## \[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.M | re.S)
           print(m.group(1).strip() if m else f"Release {version}.")
           PY
-      - name: Create the GitHub release
+      - name: Create the GitHub release (or attach the files to one made on github.com)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/* --title "proofcheck $TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" dist/* --repo "$REPO" --title "proofcheck $TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          fi
