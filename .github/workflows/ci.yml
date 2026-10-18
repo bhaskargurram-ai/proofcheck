@@ -31,6 +31,42 @@ jobs:
       - name: Demo (pytest runner)
         run: PROOFCHECK_RUNNER=pytest examples/demo/run_demo.sh "$RUNNER_TEMP/demo"
 
+  # The same unit tests on macOS and Windows (one Python version each).
+  test-os:
+    name: test (${{ matrix.os }}, 3.12)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Unit tests (pytest)
+        run: python -m pytest -q --junitxml=junit.xml
+      - name: Report failures as annotations
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import os, xml.etree.ElementTree as ET
+          if not os.path.exists("junit.xml"):
+              raise SystemExit(0)
+          for case in ET.parse("junit.xml").iter("testcase"):
+              for tag in ("failure", "error"):
+                  el = case.find(tag)
+                  if el is not None:
+                      text = ((el.get("message") or "") + "\n" + (el.text or "")[-1500:]).strip()
+                      text = text.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+                      print(f"::error title={case.get('name')}::{text}")
+          EOF
+
   # Build the distributions and use them the way a user would: install the
   # wheel into a fresh virtualenv (outside the checkout) and run the CLI,
   # `proofcheck init` and the demo against it.
