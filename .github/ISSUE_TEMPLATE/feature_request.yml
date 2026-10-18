@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest a check, backend, runner or integration for proofcheck.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to check, and where does proofcheck fall short today?
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: A concrete case, ideally a real bug or analysis this would have caught.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other tools or workarounds you have tried.
