@@ -188,7 +188,7 @@ class RunnerConfigTest(unittest.TestCase):
             r = PytestRunner(command=[sys.executable, str(script), "{junitxml}", str(out)])
             res = r.run(wt, [], {"PYTHONPATH": "/user/extra", "PATH": "/usr/bin:/bin"}, 30)
             self.assertIsNone(res.error)
-            parts = out.read_text().split(os.pathsep)
+            parts = out.read_text(encoding="utf-8").split(os.pathsep)
             self.assertEqual(parts, [str(wt / "src"), str(wt), "/user/extra"])
 
     def test_placeholders(self):

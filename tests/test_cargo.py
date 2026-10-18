@@ -129,8 +129,8 @@ class ClassificationTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, d, True)
         (d / "c" / "src").mkdir(parents=True)
         (d / "c" / "Cargo.toml").write_text('[package]\nname = "c-cli"\nversion = "0.1.0"\nautotests = false\n\n'
-                                             '[[bin]]\nname = "cee"\npath = "src/main.rs"\n\n[[test]]\nname = "e2e"\npath = "tests/end_to_end.rs"\n')
-        (d / "c" / "src" / "main.rs").write_text("fn main() {}\n")
+                                             '[[bin]]\nname = "cee"\npath = "src/main.rs"\n\n[[test]]\nname = "e2e"\npath = "tests/end_to_end.rs"\n', encoding="utf-8")
+        (d / "c" / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
         info = crate_info(d, "c")
         self.assertEqual((info.package, info.has_lib, info.bins, info.autotests), ("c-cli", False, ["cee"], False))
         self.assertEqual(info.test_targets, {"tests/end_to_end.rs": "e2e"})
@@ -142,7 +142,7 @@ class ClassificationTest(unittest.TestCase):
         for name in ("one", "two"):
             (d / name / ".git").mkdir(parents=True)
             (d / name / "src").mkdir()
-            (d / name / "src" / "lib.rs").write_text("")
+            (d / name / "src" / "lib.rs").write_text("", encoding="utf-8")
             os.utime(d / name / "src" / "lib.rs", (1, 1))
         target = d / "target"
         target.mkdir()
@@ -151,7 +151,7 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual((d / "two" / "src" / "lib.rs").stat().st_mtime, 1)
         self.assertFalse(ensure_fresh(d / "one" / "src", str(target)))  # same checkout: no touching
         self.assertTrue(ensure_fresh(d / "two", str(target)))
-        self.assertEqual((target / MARKER_NAME).read_text().strip(), str((d / "two").resolve()))
+        self.assertEqual((target / MARKER_NAME).read_text(encoding="utf-8").strip(), str((d / "two").resolve()))
 
 
 @unittest.skipUnless(cargo_path(), "cargo is not installed")

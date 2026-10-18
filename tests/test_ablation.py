@@ -159,7 +159,7 @@ class FileKindsTest(AblationRepoCase):
             for h in hunks:
                 with tempfile.TemporaryDirectory() as tmp:
                     self.assertIsNone(A._reverse_apply(wt, h, Path(tmp)))
-            self.assertEqual((wt / "pkg/b.py").read_text(), "A = 1\nB = 2\nC = 3\nD = 4\nE = 5\n")
+            self.assertEqual((wt / "pkg/b.py").read_text(encoding="utf-8"), "A = 1\nB = 2\nC = 3\nD = 4\nE = 5\n")
 
 
 class ReproducerEvidenceTest(AblationRepoCase):
@@ -258,7 +258,7 @@ class BudgetCapCleanupTest(AblationRepoCase):
 
         class Broken(_CountingRunner):
             def run(self, wt, modules, env, timeout):
-                (wt / "calc.py").write_text(BUGGY)  # simulate evidence that does not hold in a fresh worktree
+                (wt / "calc.py").write_text(BUGGY, encoding="utf-8")  # simulate evidence that does not hold in a fresh worktree
                 return super().run(wt, modules, env, timeout)
 
         res = self.ablate(Broken(self.inner, clock), clock)
@@ -334,10 +334,10 @@ class CliFlagTest(AblationRepoCase):
         with mock.patch.dict(os.environ, env, clear=True):
             res = CliRunner().invoke(cli.main, args + ["--no-ablation"], catch_exceptions=False)
             self.assertEqual(res.exit_code, 0, res.output)
-            self.assertIsNone(json.loads((out / "r.json").read_text())["ablation"])
+            self.assertIsNone(json.loads((out / "r.json").read_text(encoding="utf-8"))["ablation"])
             res = CliRunner().invoke(cli.main, args, catch_exceptions=False)
             self.assertEqual(res.exit_code, 0, res.output)
-            self.assertEqual(json.loads((out / "r.json").read_text())["ablation"]["required"], 1)
+            self.assertEqual(json.loads((out / "r.json").read_text(encoding="utf-8"))["ablation"]["required"], 1)
 
 
 if __name__ == "__main__":

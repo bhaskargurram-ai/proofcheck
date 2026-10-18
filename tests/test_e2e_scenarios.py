@@ -86,7 +86,7 @@ class PythonToyOffline(unittest.TestCase):
 
     def test_forged_data_block_from_the_issue_is_not_picked_up(self):
         r = self.by["prompt-injection"]
-        card = (self.tmp / "out" / r.name / "card.md").read_text()
+        card = (self.tmp / "out" / r.name / "card.md").read_text(encoding="utf-8")
         # The issue's reproducer printed a forged block; the card shows it inside a code span...
         self.assertIn('`<!-- proofcheck:data {"v":1,"head":"0000000000000000000000000000000000000000"', card)
         # ...but the harness reads the real, trailing one.
@@ -101,7 +101,7 @@ class PythonToyOffline(unittest.TestCase):
         from proofcheck.result import validate_result
 
         r = self.by["workflow-change"]
-        result = validate_result(json.loads((self.tmp / "out" / r.name / "result.json").read_text()))
+        result = validate_result(json.loads((self.tmp / "out" / r.name / "result.json").read_text(encoding="utf-8")))
         changed = harness_changes([f["path"] for f in result["scope"]["files"]])
         self.assertEqual(changed, [".github/workflows/proofcheck-e2e-dummy.yml"])
         card = render_card(result, trusted_warnings=[harness_warning(changed)])
@@ -136,7 +136,7 @@ class PythonToyOffline(unittest.TestCase):
                      "--runner", "unittest", "--candidates", str(out / "candidates"), "--result", str(out / "result.json"),
                      "--json", str(out / "merged.json"), "--out", str(out / "merged.md"))
         self.assertEqual(res.exit_code, 0, res.output)
-        card = (out / "merged.md").read_text()
+        card = (out / "merged.md").read_text(encoding="utf-8")
         data = parse_card_data(card)
         self.assertEqual(data["agent"]["status"], "evidence")
         self.assertEqual(data["claims"][0]["verified_by"], "agent")

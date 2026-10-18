@@ -127,7 +127,7 @@ class RoutingTest(unittest.TestCase):
 
 def write_body(d: Path, text: str) -> str:
     p = d / "body.md"
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     return str(p)
 
 
@@ -190,8 +190,8 @@ class TwoProjectRunTest(unittest.TestCase):
             "--json", str(out / "result.json"), "--out", str(out / "card.md"),
         ], catch_exceptions=False)
         self.assertEqual(res.exit_code, 0, res.output)
-        result = validate_result(json.loads((out / "result.json").read_text()))
-        return result, (out / "card.md").read_text()
+        result = validate_result(json.loads((out / "result.json").read_text(encoding="utf-8")))
+        return result, (out / "card.md").read_text(encoding="utf-8")
 
     def check_result(self, result, card, sdk_id):
         tests = result["tests"]
@@ -312,7 +312,7 @@ def provio_like_tree(root: Path) -> None:
     for rel, text in files.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text)
+        p.write_text(text, encoding="utf-8")
 
 
 class InitProjectsTest(unittest.TestCase):
@@ -348,7 +348,7 @@ class InitProjectsTest(unittest.TestCase):
                          [("rust", ".", "cargo"), ("python", "adapters/python", "pytest")])
         self.assertEqual(cfg.ablation.time_budget_s, 1200)
         self.assertEqual([p.name for p in build_projects(cfg)], ["rust", "python"])
-        wf = (self.root / ".github/workflows/proofcheck.yml").read_text()
+        wf = (self.root / ".github/workflows/proofcheck.yml").read_text(encoding="utf-8")
         self.assertIn("timeout-minutes: 90", wf)
         self.assertIn("""install-command: 'pip install -e "./adapters/python[dev]" pytest || pip install pytest'""", wf)
         try:
@@ -359,33 +359,33 @@ class InitProjectsTest(unittest.TestCase):
 
     def test_single_project_output_is_unchanged(self):
         (self.root / "tests").mkdir()
-        (self.root / "tests" / "test_a.py").write_text("")
-        (self.root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+        (self.root / "tests" / "test_a.py").write_text("", encoding="utf-8")
+        (self.root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
         res = init_repo(self.root)
         self.assertEqual((res.runner, res.projects), ("pytest", []))
-        text = (self.root / "proofcheck.toml").read_text()
+        text = (self.root / "proofcheck.toml").read_text(encoding="utf-8")
         self.assertNotIn("[[project]]", text)
         self.assertIn('runner = "pytest"', text)
 
     def test_python_root_with_cargo_subfolder(self):
-        (self.root / "pyproject.toml").write_text('[tool.pytest.ini_options]\n')
+        (self.root / "pyproject.toml").write_text('[tool.pytest.ini_options]\n', encoding="utf-8")
         (self.root / "native" / "crates" / "a").mkdir(parents=True)
-        (self.root / "native" / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/a"]\n')
-        (self.root / "native" / "crates" / "a" / "Cargo.toml").write_text('[package]\nname = "a"\n')
+        (self.root / "native" / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/a"]\n', encoding="utf-8")
+        (self.root / "native" / "crates" / "a" / "Cargo.toml").write_text('[package]\nname = "a"\n', encoding="utf-8")
         res = init_repo(self.root)
         self.assertEqual([(p.name, p.path, p.runner) for p in res.projects],
                          [("python", ".", "pytest"), ("native", "native", "cargo")])
-        cfg = parse_config_text((self.root / "proofcheck.toml").read_text(), "proofcheck.toml")
+        cfg = parse_config_text((self.root / "proofcheck.toml").read_text(encoding="utf-8"), "proofcheck.toml")
         self.assertEqual(len(cfg.projects), 2)
         self.assertEqual(cfg.runner, "pytest")  # the top-level runner line is commented out
 
     def test_rust_only_repository(self):
-        (self.root / "Cargo.toml").write_text('[package]\nname = "solo"\nversion = "0.1.0"\n')
+        (self.root / "Cargo.toml").write_text('[package]\nname = "solo"\nversion = "0.1.0"\n', encoding="utf-8")
         res = init_repo(self.root)
         self.assertEqual((res.runner, res.projects), ("cargo", []))
-        text = (self.root / "proofcheck.toml").read_text()
+        text = (self.root / "proofcheck.toml").read_text(encoding="utf-8")
         self.assertIn('runner = "cargo"', text)
-        wf = (self.root / ".github/workflows/proofcheck.yml").read_text()
+        wf = (self.root / ".github/workflows/proofcheck.yml").read_text(encoding="utf-8")
         self.assertIn("install-command: ''", wf)
         self.assertIn("timeout-minutes: 90", wf)
 
