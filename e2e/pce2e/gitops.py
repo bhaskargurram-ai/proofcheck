@@ -86,7 +86,9 @@ class Git:
         self.timeout = timeout
 
     def __call__(self, *args: str, check: bool = True) -> str:
-        cmd = ["git", *GIT_IDENTITY, "-C", str(self.cwd), *args]
+        # core.autocrlf=false: patches have LF lines; a CRLF checkout (the
+        # Windows default) would make every patch fail to apply.
+        cmd = ["git", *GIT_IDENTITY, "-c", "core.autocrlf=false", "-C", str(self.cwd), *args]
         try:
             res = subprocess.run(cmd, env=self.env, capture_output=True, text=True, timeout=self.timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:

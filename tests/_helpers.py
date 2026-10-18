@@ -22,7 +22,7 @@ GIT_ID = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c",
 
 
 def git(repo: Path, *args: str) -> str:
-    out = subprocess.run(["git", *GIT_ID, "-C", str(repo), *args], check=True, capture_output=True, text=True)
+    out = subprocess.run(["git", *GIT_ID, "-C", str(repo), *args], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return out.stdout.strip()
 
 

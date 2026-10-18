@@ -88,7 +88,7 @@ class ProposeVerifyE2E(unittest.TestCase):
         # import repair: textutils -> textutil
         first = m["candidates"][0]
         self.assertTrue(any("textutils" in r and "textutil" in r for r in first["repairs"]), first["repairs"])
-        stored = (self.out / "tests/proofcheck_agent/test_reproduce_issue.py").read_text()
+        stored = (self.out / "tests/proofcheck_agent/test_reproduce_issue.py").read_text(encoding="utf-8")
         self.assertIn("from textutil import word_count", stored)
         # the syntax error was rejected and reported back to the model
         self.assertIn("Rejected by proofcheck", transport.request_text(3))
@@ -100,7 +100,7 @@ class ProposeVerifyE2E(unittest.TestCase):
         self.assertEqual(m["usage"]["output_tokens"], 300)
         self.assertIsNotNone(m["cost_usd"])
         # transcript is redacted
-        transcript = (self.out / "transcript.jsonl").read_text()
+        transcript = (self.out / "transcript.jsonl").read_text(encoding="utf-8")
         self.assertNotIn("secret-key-123456", transcript)
         self.assertEqual(load_manifest(self.out)["candidates"][0]["file"], "tests/proofcheck_agent/test_reproduce_issue.py")
 
@@ -227,13 +227,13 @@ class AgentCliTest(unittest.TestCase):
             return CliRunner().invoke(cli.main, list(args), catch_exceptions=False)
 
     def test_run_propose_verify_pipeline(self):
-        (self.out / "pr.md").write_text("Title: Fix word_count\n\n" + PR_BODY)
-        (self.out / "issue.md").write_text(ISSUE)
+        (self.out / "pr.md").write_text("Title: Fix word_count\n\n" + PR_BODY, encoding="utf-8")
+        (self.out / "issue.md").write_text(ISSUE, encoding="utf-8")
         res = self.invoke("run", "--repo", str(self.repo.path), "--base", "main", "--head", "fix", "--runner", "unittest",
                           "--test-command", UNITTEST_CMD, "--pr-body-file", str(self.out / "pr.md"),
                           "--json", str(self.out / "result.json"), "--out", str(self.out / "card.md"))
         self.assertEqual(res.exit_code, 0, res.output)
-        result = json.loads((self.out / "result.json").read_text())
+        result = json.loads((self.out / "result.json").read_text(encoding="utf-8"))
         self.assertEqual(result["claims"][0]["status"], "unverified")
 
         # needed?
@@ -244,7 +244,7 @@ class AgentCliTest(unittest.TestCase):
         res = self.invoke("agent", "propose", "--repo", str(self.repo.path), "--base", "main", "--head", "fix",
                           "--runner", "unittest", "--result", str(self.out / "result.json"), "--out-dir", str(self.out / "c0"))
         self.assertEqual(res.exit_code, 0, res.output)
-        self.assertEqual(json.loads((self.out / "c0/manifest.json").read_text())["status"], "skipped")
+        self.assertEqual(json.loads((self.out / "c0/manifest.json").read_text(encoding="utf-8"))["status"], "skipped")
 
         # missing model -> clear error
         res = self.invoke("agent", "propose", "--repo", str(self.repo.path), "--base", "main", "--head", "fix", "--enable",
@@ -264,10 +264,10 @@ class AgentCliTest(unittest.TestCase):
                           "--result", str(self.out / "result.json"), "--json", str(self.out / "merged.json"),
                           "--out", str(self.out / "merged.md"))
         self.assertEqual(res.exit_code, 0, res.output)
-        merged = json.loads((self.out / "merged.json").read_text())
-        self.assertEqual(merged["agent"]["status"], "evidence")
+        merged = json.loads((self.out / "merged.json").read_text(encoding="utf-8"))
+        self.assertEqual(merged["agent"]["status"], "evidence", json.dumps(merged["agent"])[:3000])
         self.assertEqual(merged["claims"][0]["status"], "verified")
-        self.assertIn("verified (agent test)", (self.out / "merged.md").read_text())
+        self.assertIn("verified (agent test)", (self.out / "merged.md").read_text(encoding="utf-8"))
         # the privileged comment path accepts the merged result
         res = self.invoke("comment", "--json", str(self.out / "merged.json"), "--pr", "3", "--dry-run")
         self.assertEqual(res.exit_code, 0, res.output)

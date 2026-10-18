@@ -358,10 +358,10 @@ class RustProposeVerifyE2E(unittest.TestCase):
         self.assertIn("Command::new", transport.request_text(2))
         repro = m["candidates"][0]
         self.assertTrue(any("crate::" in r for r in repro["repairs"]), repro["repairs"])
-        stored = (self.out / "crates/core-math/tests/proofcheck_agent_reproduce_issue.rs").read_text()
+        stored = (self.out / "crates/core-math/tests/proofcheck_agent_reproduce_issue.rs").read_text(encoding="utf-8")
         self.assertTrue(stored.startswith("use core_math::add;"))
         self.assertIn("use core_math::add_all;",
-                      (self.out / "crates/core-math/tests/proofcheck_agent_exercise_diff.rs").read_text())
+                      (self.out / "crates/core-math/tests/proofcheck_agent_exercise_diff.rs").read_text(encoding="utf-8"))
         loaded = load_manifest(self.out)
         self.assertEqual(loaded["language"], "rust")
         self.assertEqual(loaded["candidates"][1]["file"], "crates/core-math/tests/proofcheck_agent_exercise_diff.rs")
@@ -411,15 +411,15 @@ class RustProposeVerifyE2E(unittest.TestCase):
             _result(self.repo), section, 12))))
         # tamper with the stored candidate: verify re-runs the static checks before compiling anything
         f = self.out / "crates/core-math/tests/proofcheck_agent_exercise_diff.rs"
-        f.write_text(DENIED)
+        f.write_text(DENIED, encoding="utf-8")
         _, section = verify_candidates_dir(self.repo.path, "main", "fix", self.out, None, cargo_env(), None, projects=projects)
         self.assertEqual(section["candidates"][0]["classification"], INVALID)
         self.assertIn("Command::new", section["candidates"][0]["message"])
 
     def test_cli_runner_cargo(self):
         out = self.out
-        (out / "pr.md").write_text("Title: Fix add\n\n" + PR_BODY)
-        (out / "issue.md").write_text(ISSUE)
+        (out / "pr.md").write_text("Title: Fix add\n\n" + PR_BODY, encoding="utf-8")
+        (out / "issue.md").write_text(ISSUE, encoding="utf-8")
         env = {k: v for k, v in cargo_env().items() if not k.startswith(("GITHUB_", "PROOFCHECK_"))}
         env["CARGO_TARGET_DIR"] = str(SHARED_TARGET)
         transport = ScriptedTransport("openai", [[submit(STRONG_VIA_CRATE)]])
@@ -435,7 +435,7 @@ class RustProposeVerifyE2E(unittest.TestCase):
                                                 "--json", str(out / "merged.json"), "--out", str(out / "card.md")],
                                      catch_exceptions=False)
         self.assertEqual(res.exit_code, 0, res.output)
-        merged = json.loads((out / "merged.json").read_text())
+        merged = json.loads((out / "merged.json").read_text(encoding="utf-8"))
         self.assertEqual(merged["agent"]["status"], "evidence", merged["agent"])
         self.assertEqual(merged["agent"]["winner"]["file"], "crates/core-math/tests/proofcheck_agent_reproduce_issue.rs")
 
@@ -505,8 +505,8 @@ class TwoProjectAgentTest(unittest.TestCase):
 
     def test_cli_propose_verify_in_the_python_subproject(self):
         out = self.out
-        (out / "pr.md").write_text("Title: Fix the greeting\n\nFixes #3.")
-        (out / "issue.md").write_text("greet() should say 'Hello, Ada'.")
+        (out / "pr.md").write_text("Title: Fix the greeting\n\nFixes #3.", encoding="utf-8")
+        (out / "issue.md").write_text("greet() should say 'Hello, Ada'.", encoding="utf-8")
         transport = ScriptedTransport("anthropic", [[("list_tests", {})], [submit(SDK_REPRO, "test_greet.py")]])
         fake = ToolLLM("anthropic", "m", "k", transport=transport, sleep=lambda s: None)
         env = {k: v for k, v in scrubbed_env().items() if not k.startswith(("GITHUB_", "PROOFCHECK_"))}
@@ -517,7 +517,7 @@ class TwoProjectAgentTest(unittest.TestCase):
                                                 str(out / "pr.md"), "--issue-body-file", str(out / "issue.md"),
                                                 "--out-dir", str(out / "cands")], catch_exceptions=False)
             self.assertEqual(res.exit_code, 0, res.output)
-            manifest = json.loads((out / "cands/manifest.json").read_text())
+            manifest = json.loads((out / "cands/manifest.json").read_text(encoding="utf-8"))
             self.assertEqual((manifest["project"], manifest["project_path"], manifest["language"], manifest["style"]),
                              ("sdk", "sdk", "python", "unittest"))
             cand = manifest["candidates"][0]
@@ -531,11 +531,11 @@ class TwoProjectAgentTest(unittest.TestCase):
                                                 "--json", str(out / "merged.json"), "--out", str(out / "card.md")],
                                      catch_exceptions=False)
         self.assertEqual(res.exit_code, 0, res.output)
-        agent = json.loads((out / "merged.json").read_text())["agent"]
+        agent = json.loads((out / "merged.json").read_text(encoding="utf-8"))["agent"]
         self.assertEqual((agent["status"], agent["project"], agent["language"]), ("evidence", "sdk", "python"), agent)
         self.assertEqual(agent["candidates"][0]["classification"], FAIL_TO_PASS)
         self.assertEqual(agent["candidates"][0]["tests"][0]["base_kind"], "AssertionError")
-        self.assertIn("```python", (out / "card.md").read_text())
+        self.assertIn("```python", (out / "card.md").read_text(encoding="utf-8"))
 
     def test_verify_refuses_a_project_the_config_does_not_define(self):
         transport = ScriptedTransport("anthropic", [[submit(SDK_REPRO)]])

@@ -74,3 +74,15 @@ class ConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SplitCommandTest(unittest.TestCase):
+    def test_posix_and_windows_rules(self):
+        from unittest import mock  # noqa: PLC0415
+
+        from proofcheck import config  # noqa: PLC0415
+
+        self.assertEqual(config.split_command("python -m pytest -k 'a b'"), ["python", "-m", "pytest", "-k", "a b"])
+        with mock.patch.object(config.os, "name", "nt"):
+            self.assertEqual(config.split_command(r'C:\Python312\python.exe -m pytest "C:\Program Files\t.py"'),
+                             [r"C:\Python312\python.exe", "-m", "pytest", r"C:\Program Files\t.py"])

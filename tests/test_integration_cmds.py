@@ -37,26 +37,26 @@ def tmpdir(test):
 class SummaryTest(unittest.TestCase):
     def test_writes_validated_card_to_step_summary(self):
         d = tmpdir(self)
-        (d / "result.json").write_text(json.dumps(RESULT))
+        (d / "result.json").write_text(json.dumps(RESULT), encoding="utf-8")
         summary = d / "summary.md"
-        summary.write_text("earlier step\n")
+        summary.write_text("earlier step\n", encoding="utf-8")
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
         env["GITHUB_STEP_SUMMARY"] = str(summary)
         with mock.patch.dict(os.environ, env, clear=True):
             res = CliRunner().invoke(cli.main, ["summary", "--json", str(d / "result.json")], catch_exceptions=False)
         self.assertEqual(res.exit_code, 0, res.output)
-        text = summary.read_text()
+        text = summary.read_text(encoding="utf-8")
         self.assertTrue(text.startswith("earlier step\n" + CARD_MARKER))  # appended, not overwritten
         self.assertIn("Some claims are backed by evidence", text)
         self.assertNotIn("<script>", text)
 
     def test_stdout_without_summary_file_and_rejects_forgery(self):
         d = tmpdir(self)
-        (d / "result.json").write_text(json.dumps(RESULT))
+        (d / "result.json").write_text(json.dumps(RESULT), encoding="utf-8")
         with mock.patch("builtins.print") as p:
             self.assertIsNone(write_summary(d / "result.json", env={}))
         self.assertIn(CARD_MARKER, p.call_args[0][0])
-        (d / "bad.json").write_text(json.dumps(dict(RESULT, verdict="totally-verified")))
+        (d / "bad.json").write_text(json.dumps(dict(RESULT, verdict="totally-verified")), encoding="utf-8")
         res = CliRunner().invoke(cli.main, ["summary", "--json", str(d / "bad.json"), "--out", str(d / "o.md")])
         self.assertNotEqual(res.exit_code, 0)
         self.assertIn("could not write summary", res.output)
@@ -134,7 +134,7 @@ class LabelsTest(unittest.TestCase):
 
     def test_comment_command_sets_label_and_survives_label_errors(self):
         d = tmpdir(self)
-        (d / "result.json").write_text(json.dumps(RESULT))
+        (d / "result.json").write_text(json.dumps(RESULT), encoding="utf-8")
         fake = FakeLabelsAPI(fail_create=True)
         comments = []
 
@@ -193,7 +193,7 @@ class ContextFromApiTest(unittest.TestCase):
             transport_fn = transport
             res = CliRunner().invoke(cli.main, ["context", "--pr", "7", "--out", str(d / "ctx.json")], catch_exceptions=False)
         self.assertEqual(res.exit_code, 0, res.output)
-        data = json.loads((d / "ctx.json").read_text())
+        data = json.loads((d / "ctx.json").read_text(encoding="utf-8"))
         self.assertEqual((data["title"], data["number"], list(data["issues"])), ("Fix add", 7, ["#3"]))
         res = CliRunner().invoke(cli.main, ["context", "--pr", "7; rm -rf /", "--out", str(d / "x.json")])
         self.assertNotEqual(res.exit_code, 0)
@@ -217,34 +217,34 @@ class InitTest(unittest.TestCase):
                 d = tmpdir(self)
                 for name, text in files.items():
                     (d / name).parent.mkdir(parents=True, exist_ok=True)
-                    (d / name).write_text(text)
+                    (d / name).write_text(text, encoding="utf-8")
                 self.assertEqual(detect_runner(d)[0], want)
 
     def test_writes_files_and_refuses_overwrite(self):
         d = tmpdir(self)
         (d / "tests").mkdir()
-        (d / "tests" / "test_a.py").write_text("def test_a(): pass\n")
+        (d / "tests" / "test_a.py").write_text("def test_a(): pass\n", encoding="utf-8")
         res = init_repo(d, ref="v1.0.0")
         self.assertEqual(res.runner, "pytest")
         self.assertEqual(res.written, [EVIDENCE_PATH, COMMENT_PATH, CONFIG_PATH])
         self.assertFalse((d / AGENT_PATH).exists())
-        ev = (d / EVIDENCE_PATH).read_text()
+        ev = (d / EVIDENCE_PATH).read_text(encoding="utf-8")
         self.assertIn("uses: bhaskargurram-ai/proofcheck/.github/workflows/evidence.yml@v1.0.0", ev)
         self.assertIn("proofcheck-ref: v1.0.0", ev)
-        self.assertNotIn("pull_request_target:", ev + (d / COMMENT_PATH).read_text())
-        cfg = parse_config_text((d / CONFIG_PATH).read_text(), "proofcheck.toml")
+        self.assertNotIn("pull_request_target:", ev + (d / COMMENT_PATH).read_text(encoding="utf-8"))
+        cfg = parse_config_text((d / CONFIG_PATH).read_text(encoding="utf-8"), "proofcheck.toml")
         self.assertEqual((cfg.runner, cfg.ablation.enabled, cfg.ablation.max_hunks), ("pytest", True, 12))
 
-        (d / CONFIG_PATH).write_text("# mine\n")
+        (d / CONFIG_PATH).write_text("# mine\n", encoding="utf-8")
         with self.assertRaises(InitError) as cm:
             init_repo(d, agent=True)
         self.assertIn("proofcheck.toml", str(cm.exception))
-        self.assertEqual((d / CONFIG_PATH).read_text(), "# mine\n")  # untouched
+        self.assertEqual((d / CONFIG_PATH).read_text(encoding="utf-8"), "# mine\n")  # untouched
         self.assertFalse((d / AGENT_PATH).exists())  # nothing written at all
 
         res = init_repo(d, agent=True, force=True)
         self.assertIn(AGENT_PATH, res.written)
-        self.assertNotEqual((d / CONFIG_PATH).read_text(), "# mine\n")
+        self.assertNotEqual((d / CONFIG_PATH).read_text(encoding="utf-8"), "# mine\n")
         steps = "\n".join(res.next_steps)
         self.assertIn("PROOFCHECK_LLM_API_KEY", steps)
         self.assertIn("PROOFCHECK_LLM_MODEL", steps)
@@ -258,22 +258,22 @@ class InitTest(unittest.TestCase):
         with_agent, without = tmpdir(self), tmpdir(self)
         init_repo(with_agent, agent=True)
         init_repo(without)
-        on = tomllib.loads((with_agent / CONFIG_PATH).read_text())
-        off = tomllib.loads((without / CONFIG_PATH).read_text())
+        on = tomllib.loads((with_agent / CONFIG_PATH).read_text(encoding="utf-8"))
+        off = tomllib.loads((without / CONFIG_PATH).read_text(encoding="utf-8"))
         self.assertTrue(parse_agent_config(on.get("agent"), "proofcheck.toml").enabled)
         self.assertFalse(parse_agent_config(off.get("agent"), "proofcheck.toml").enabled)
-        self.assertIsNotNone(parse_config_text((with_agent / CONFIG_PATH).read_text(), "proofcheck.toml"))
+        self.assertIsNotNone(parse_config_text((with_agent / CONFIG_PATH).read_text(encoding="utf-8"), "proofcheck.toml"))
 
     def test_cli_and_bad_ref(self):
         d = tmpdir(self)
-        (d / "package.json").write_text(json.dumps({"devDependencies": {"jest": "29"}}))
+        (d / "package.json").write_text(json.dumps({"devDependencies": {"jest": "29"}}), encoding="utf-8")
         res = CliRunner().invoke(cli.main, ["init", "--repo", str(d), "--agent", "--ref", "0123456789abcdef0123456789abcdef01234567"])
         self.assertEqual(res.exit_code, 0, res.output)
         self.assertIn("Detected test runner: jest", res.output)
         self.assertIn("jest-junit", res.output)
         self.assertIn("gh secret set PROOFCHECK_LLM_API_KEY", res.output)
-        self.assertIn('node-version: "20"', (d / EVIDENCE_PATH).read_text())
-        self.assertIn("install-command: 'npm ci'", (d / AGENT_PATH).read_text())
+        self.assertIn('node-version: "20"', (d / EVIDENCE_PATH).read_text(encoding="utf-8"))
+        self.assertIn("install-command: 'npm ci'", (d / AGENT_PATH).read_text(encoding="utf-8"))
         res = CliRunner().invoke(cli.main, ["init", "--repo", str(d)])
         self.assertNotEqual(res.exit_code, 0)
         self.assertIn("refusing to overwrite", res.output)
@@ -284,9 +284,9 @@ class InitTest(unittest.TestCase):
     def test_examples_match_generated_callers(self):
         ex = _helpers.ROOT / "examples" / "workflows"
         ref = f"v{proofcheck.__version__}"
-        self.assertEqual((ex / "proofcheck.yml").read_text(), evidence_caller(ref, "pytest"))
-        self.assertEqual((ex / "proofcheck-comment.yml").read_text(), comment_caller(ref))
-        self.assertEqual((ex / "proofcheck-agent.yml").read_text(), agent_caller(ref, "pytest"))
+        self.assertEqual((ex / "proofcheck.yml").read_text(encoding="utf-8"), evidence_caller(ref, "pytest"))
+        self.assertEqual((ex / "proofcheck-comment.yml").read_text(encoding="utf-8"), comment_caller(ref))
+        self.assertEqual((ex / "proofcheck-agent.yml").read_text(encoding="utf-8"), agent_caller(ref, "pytest"))
 
 
 if __name__ == "__main__":

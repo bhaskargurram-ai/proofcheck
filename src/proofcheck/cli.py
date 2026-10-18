@@ -13,7 +13,7 @@ from . import __version__
 from . import claims as C
 from .card import harness_warning, render_card
 from .check import PRContext, context_from_event, run_check
-from .config import ConfigError, load_config_file, load_config_from_ref
+from .config import ConfigError, load_config_file, load_config_from_ref, split_command
 from .github_api import GitHubError, env_client, harness_changes, pr_number_from_event, validate_number
 from .llm import extractor_from_env
 from .result import ResultValidationError, validate_result
@@ -117,7 +117,6 @@ def run_cmd(repo: str, base: str, head: str, title: str | None, pr_body_file: st
             context_file: str | None, fetch_issues: bool, use_llm: bool | None, skip_tests: bool, out_path: str | None, json_path: str | None,
             fail_on: str, ablation: bool | None = None) -> None:
     """Gather evidence for a pull request and write the proof card."""
-    import shlex
 
     from . import git as gitmod
 
@@ -131,7 +130,7 @@ def run_cmd(repo: str, base: str, head: str, title: str | None, pr_body_file: st
     if runner:
         cfg.runner = runner
     if test_command:
-        cfg.test_command = shlex.split(test_command)
+        cfg.test_command = split_command(test_command)
     if ablation is not None:
         cfg.ablation.enabled = ablation
 

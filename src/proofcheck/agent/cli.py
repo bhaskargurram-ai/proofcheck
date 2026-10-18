@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,7 @@ from typing import Any
 import click
 
 from .. import git as gitmod
-from ..config import Config, ConfigError, load_config_file, load_config_from_ref
+from ..config import Config, ConfigError, load_config_file, load_config_from_ref, split_command
 from ..proc import scrub_env
 from ..projects import Project, build_projects
 from ..runners import RUNNER_NAMES
@@ -38,7 +37,7 @@ def _projects(cfg: Config, repo: str, runner: str | None, test_command: str | No
     if runner:
         cfg.runner = runner
     if test_command:
-        cfg.test_command = shlex.split(test_command)
+        cfg.test_command = split_command(test_command)
     try:
         return build_projects(cfg, repo)
     except ValueError as exc:

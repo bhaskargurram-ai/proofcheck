@@ -39,7 +39,10 @@ def git(repo: str | os.PathLike[str], *args: str, check: bool = True, binary: bo
         check: Raise :class:`GitError` on a non-zero exit code.
         binary: Return raw bytes instead of decoded text.
     """
-    argv = ["git", "-C", str(repo), "-c", "core.quotepath=off", *args]
+    # core.autocrlf=false: worktrees get each file exactly as committed. With
+    # the Windows default (true), checkouts have CRLF line endings that no
+    # longer match the LF lines of ``git diff``, so no hunk could be ablated.
+    argv = ["git", "-C", str(repo), "-c", "core.quotepath=off", "-c", "core.autocrlf=false", *args]
     proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_git_env(), shell=False)
     if check and proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed ({proc.returncode}): {proc.stderr.decode(errors='replace').strip()}")

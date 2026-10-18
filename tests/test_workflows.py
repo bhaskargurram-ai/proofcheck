@@ -167,7 +167,7 @@ class WorkflowSecurityTest(unittest.TestCase):
             if isinstance(on, dict) and "workflow_run" in on:
                 self.assertNotIn("rust-cache", json.dumps(wf))
         for name in ("comment.yml", "agent.yml"):
-            self.assertNotIn("rust-cache", (WF_DIR / name).read_text())
+            self.assertNotIn("rust-cache", (WF_DIR / name).read_text(encoding="utf-8"))
 
     def test_rust_setup_runs_after_the_token_step(self):
         job = load(WF_DIR / "evidence.yml")["jobs"]["evidence"]

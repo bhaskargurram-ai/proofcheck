@@ -8,6 +8,7 @@ command with ``true``).
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import sys
@@ -29,12 +30,26 @@ class ConfigError(ValueError):
     """Raised for invalid configuration values."""
 
 
+def split_command(command: str) -> list[str]:
+    """Split a command line into arguments.
+
+    POSIX shell rules on Linux and macOS. On Windows, POSIX rules would treat
+    the backslashes of ``C:\\Python\\python.exe`` as escapes and drop them,
+    so the command is split with ``posix=False`` and surrounding quotes are
+    removed from each argument.
+    """
+    if os.name != "nt":
+        return shlex.split(command)
+    parts = shlex.split(command, posix=False)
+    return [p[1:-1] if len(p) >= 2 and p[0] == p[-1] and p[0] in "\"'" else p for p in parts]
+
+
 def _as_command(value: Any, key: str) -> list[str] | None:
     """Normalize a command given as a string (shlex-split) or a list of strings."""
     if value is None or value == "" or value == []:
         return None
     if isinstance(value, str):
-        return shlex.split(value)
+        return split_command(value)
     if isinstance(value, list) and all(isinstance(v, str) for v in value):
         return list(value)
     raise ConfigError(f"{key} must be a string or a list of strings")

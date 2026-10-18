@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -124,7 +125,7 @@ class ScenarioLoadingTest(TempDirCase):
         self.assertEqual(substitute("{x} {issue} {issue}", None), "{x} ? ?")
 
     def bad(self, toml, files=None, set_toml=None, msg=""):
-        root = make_set(self.tmp / msg.replace(" ", "_"), {"bad": (toml, files if files is not None else {"files/toy/a.py": "x"})},
+        root = make_set(self.tmp / re.sub(r"[^A-Za-z0-9_-]", "_", msg), {"bad": (toml, files if files is not None else {"files/toy/a.py": "x"})},
                         set_toml=set_toml)
         with self.assertRaises(ScenarioError) as cm:
             load_set(root)
@@ -173,7 +174,7 @@ class ScenarioLoadingTest(TempDirCase):
         self.assertIn("regular files", str(cm.exception))
 
     def test_patch_paths(self):
-        text = (TOY / "smuggled-hunk" / "patch.diff").read_text()
+        text = (TOY / "smuggled-hunk" / "patch.diff").read_text(encoding="utf-8")
         self.assertEqual(patch_paths(text), ["e2e_toy/settings.py", "e2e_toy/tests/test_textops.py", "e2e_toy/textops.py"])
         self.assertEqual(patch_paths("diff --git a/x b/y\nrename from x\nrename to y\n"), ["x", "y"])
 
@@ -188,7 +189,7 @@ class ScenarioLoadingTest(TempDirCase):
 def init_repo(path):
     git = Git(path)
     git.init()
-    (path / "README.md").write_text("hi\n")
+    (path / "README.md").write_text("hi\n", encoding="utf-8")
     git("add", "-A")
     git("commit", "-q", "-m", "initial")
     git("branch", "-M", "main")
@@ -365,11 +366,11 @@ class ReportTest(TempDirCase):
         self.assertIn('"verdict": "evidence"', md)
         self.assertIn("- cleanup: closed PR #4", md)
         md_path, js_path = report.write_report(rep, self.tmp / "out")
-        doc = json.loads(js_path.read_text())
+        doc = json.loads(js_path.read_text(encoding="utf-8"))
         self.assertEqual(doc["summary"], {"pass": 1, "fail": 1, "error": 1})
         self.assertFalse(doc["ok"])
         self.assertEqual(doc["scenarios"][0]["labels"], ["proofcheck: verified"])
-        self.assertEqual(md_path.read_text(), md)
+        self.assertEqual(md_path.read_text(encoding="utf-8"), md)
         planned = report.Report(mode="dry-run", scenario_set="s", results=[report.ScenarioResult(name="x", status="planned")])
         self.assertTrue(planned.ok)
 
@@ -525,7 +526,7 @@ class FakeGitHubServer:
         self.deleted, self.calls = [], []
 
     def _sha(self, branch):
-        r = subprocess.run(["git", "-C", str(self.bare), "rev-parse", f"refs/heads/{branch}"], capture_output=True, text=True)
+        r = subprocess.run(["git", "-C", str(self.bare), "rev-parse", f"refs/heads/{branch}"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         return r.stdout.strip() if r.returncode == 0 else None
 
     def request(self, method, url, headers=None, json=None, params=None, timeout=None):
@@ -656,7 +657,7 @@ class OnlineRunnerTest(TempDirCase):
         self.assertIsNone(by["wf"].issue_number)
         self.assertEqual(len(server.deleted), 4)
         refs = subprocess.run(["git", "-C", str(self.bare), "for-each-ref", "--format=%(refname)"],
-                              capture_output=True, text=True).stdout.split()
+                              capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.split()
         self.assertEqual(refs, ["refs/heads/main"])
         self.assertIn("closed PR", "\n".join(good.cleanup))
         self.assertTrue(all(s <= 40 for s in self.slept))  # backoff is capped
@@ -669,7 +670,7 @@ class OnlineRunnerTest(TempDirCase):
         rep = self.run_harness(server)
         self.assertTrue(rep.ok, [(r.name, r.status, r.failures, r.error) for r in rep.results])
         refs = subprocess.run(["git", "-C", str(self.bare), "for-each-ref", "--format=%(refname)"],
-                              capture_output=True, text=True).stdout.split()
+                              capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.split()
         self.assertEqual(refs, ["refs/heads/main"])
         self.assertIn("deleted 4 branch(es) with git push --delete", self.output)
         self.assertFalse(any("could not be deleted" in n for n in rep.notes))
@@ -677,7 +678,7 @@ class OnlineRunnerTest(TempDirCase):
     def test_branches_that_cannot_be_deleted_are_reported(self):
         server = FakeGitHubServer(self.bare, self.cards, refuse_delete=True)
         hook = self.bare / "hooks" / "pre-receive"
-        hook.write_text("#!/bin/sh\nwhile read old new ref; do [ \"$new\" = 0000000000000000000000000000000000000000 ] && exit 1; done\nexit 0\n")
+        hook.write_text("#!/bin/sh\nwhile read old new ref; do [ \"$new\" = 0000000000000000000000000000000000000000 ] && exit 1; done\nexit 0\n", encoding="utf-8")
         hook.chmod(0o755)
         rep = self.run_harness(server)
         note = next(n for n in rep.notes if "could not be deleted" in n)

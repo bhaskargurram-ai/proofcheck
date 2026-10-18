@@ -69,7 +69,7 @@ class MainConfigIntegrationTest(unittest.TestCase):
         self.assertIsNone(agent_config_from_text('[tool.black]\nx = 1\n', "pyproject.toml", pyproject=True))
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "proofcheck.toml"
-            p.write_text('[agent]\nvariants = ["exercise-diff"]\n')
+            p.write_text('[agent]\nvariants = ["exercise-diff"]\n', encoding="utf-8")
             self.assertEqual(load_agent_config_file(p).variants, ["exercise-diff"])
 
     def test_loaded_from_the_base_commit(self):
