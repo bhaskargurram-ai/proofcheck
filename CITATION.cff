@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use proofcheck in your work, please cite it using these metadata."
+type: software
+title: "proofcheck: Evidence that a pull request does what it claims"
+abstract: "Evidence, not authorship: check whether a pull request actually does what it claims."
+authors:
+  - family-names: Gurram
+    given-names: Bhaskar
+version: "1.0.2"
+date-released: "2026-10-14"
+license: MIT
+repository-code: "https://github.com/bhaskargurram-ai/proofcheck"
+url: "https://pypi.org/project/proofcheck-ai/"
+keywords:
+  - "software testing"
+  - "code review"
+  - "pull requests"
+  - "continuous integration"

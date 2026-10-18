@@ -25,7 +25,7 @@ It makes no attempt to guess whether a human or an AI wrote the code. It only lo
 </p>
 
 > [!NOTE]
-> **Status: stable (1.x).** Supported runners: pytest, stdlib `unittest` and Rust `cargo` (integration tests and inline `#[cfg(test)]` modules), including repositories with several projects in subfolders. Jest is experimental. The agent that writes reproduction tests is **experimental and off by default**. Feedback and runners for other ecosystems are welcome.
+> **Status: beta.** Releases are numbered 1.x, but there are no confirmed outside users yet, so details may still change. Supported runners: pytest, stdlib `unittest` and Rust `cargo` (integration tests and inline `#[cfg(test)]` modules), including repositories with several projects in subfolders. Jest is experimental. The agent that writes reproduction tests is **experimental and off by default**. Feedback and runners for other ecosystems are welcome.
 
 ## Contents
 
@@ -42,6 +42,7 @@ It makes no attempt to guess whether a human or an AI wrote the code. It only lo
 - [FAQ](#faq)
 - [Limitations](#limitations)
 - [Roadmap](#roadmap)
+- [Verification toolkit](#part-of-a-verification-toolkit) · [How to cite](#how-to-cite)
 - [Contributing](#contributing) · [License](#license)
 
 ## Why evidence instead of AI detection?
@@ -645,6 +646,18 @@ Python first: pytest (most complete) and stdlib `unittest`. Jest is experimental
 - A GitHub App mode that runs checks in isolated sandboxes instead of the PR's CI job
 - Check-run annotations next to the PR comment
 
+## Part of a verification toolkit
+
+proofcheck is one of three tools for checking whether scientific and ML computations are actually correct, including code written with AI assistance:
+
+- **[numguard](https://github.com/bhaskargurram-ai/numguard)** (`pip install numguard-ci`): Is the arithmetic right on edge cases: NaN, ±inf, overflow, subnormals, cancellation, low precision?
+- **[stataudit](https://github.com/bhaskargurram-ai/stataudit)** (`pip install stataudit`): Does a statistical conclusion survive its own data, given test assumptions, alternatives and multiple comparisons?
+- **proofcheck** (`pip install proofcheck-ai`, this package): Does a code change do what it claims: fail-to-pass tests, reproducer replay, claim-to-evidence mapping?
+
+## How to cite
+
+If you use proofcheck in research, please cite it. The repository's [`CITATION.cff`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/CITATION.cff) has the metadata; GitHub's "Cite this repository" button turns it into APA or BibTeX.
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/CONTRIBUTING.md). In short:
@@ -654,7 +667,7 @@ pip install -e ".[dev]"
 python -m pytest            # or, without pytest: python -m unittest discover -s tests
 ```
 
-The test suite builds real throwaway git repositories and worktrees, so it needs `git` on `PATH`. [docs/TESTING.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/TESTING.md) describes every test level, including the packaging check and the end-to-end harness in [`e2e/`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/e2e/README.md) that opens real pull requests against a test repository. Please report security issues privately through the repository's security advisory form rather than in a public issue.
+The test suite builds real throwaway git repositories and worktrees, so it needs `git` on `PATH`. [docs/TESTING.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/TESTING.md) describes every test level, including the packaging check and the end-to-end harness in [`e2e/`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/e2e/README.md) that opens real pull requests against a test repository. Please report security issues privately, as described in [SECURITY.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/SECURITY.md), rather than in a public issue. Everyone taking part is expected to follow the [code of conduct](https://github.com/bhaskargurram-ai/proofcheck/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 

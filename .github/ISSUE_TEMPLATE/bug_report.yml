@@ -1,0 +1,32 @@
+name: Bug report
+description: proofcheck crashed, or gave a wrong or misleading result.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did proofcheck do, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproducer
+      description: The smallest input or command that shows the problem. Please remove private data, paths and tokens.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The relevant output or error message.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `python -c "import sys, proofcheck; print(proofcheck.__version__, sys.version.split()[0])"` and your OS.
+    validations:
+      required: true
