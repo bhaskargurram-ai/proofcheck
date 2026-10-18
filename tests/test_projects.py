@@ -64,7 +64,8 @@ class ProjectConfigTest(unittest.TestCase):
         self.assertEqual(build_projects(config_from_dict({"runner": "cargo"}))[0].timeout, 1800)
         self.assertEqual(build_projects(config_from_dict({"runner": "cargo", "timeout": 60}))[0].timeout, 60)
         cfg = config_from_dict({"runner": "cargo", "cargo_target_dir": "build/tgt"})
-        self.assertEqual(build_projects(cfg, repo="/repo")[0].runner.target_dir, "/repo/build/tgt")
+        self.assertEqual(build_projects(cfg, repo="/repo")[0].runner.target_dir,
+                         str(Path("/repo").resolve() / "build" / "tgt"))
         # Single-project configurations are unchanged.
         self.assertEqual(config_from_dict({}).projects, [])
 
