@@ -6,8 +6,8 @@ abstract: "Evidence, not authorship: check whether a pull request actually does 
 authors:
   - family-names: Gurram
     given-names: Bhaskar
-version: "1.0.2"
-date-released: "2026-10-14"
+version: "1.0.3"
+date-released: "2026-10-18"
 license: MIT
 repository-code: "https://github.com/bhaskargurram-ai/proofcheck"
 url: "https://pypi.org/project/proofcheck-ai/"

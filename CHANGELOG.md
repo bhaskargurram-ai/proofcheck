@@ -4,10 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.3] - 2026-10-18
+
+### Fixed
+
+- Windows: `--test-command` and `test_command` strings are split without dropping backslashes. POSIX splitting turned `C:\Python\python.exe` into `C:Pythonpython.exe`, so no test command could start on Windows.
+- Windows: hunk ablation works with `core.autocrlf=true` (the Windows default). proofcheck runs git with `core.autocrlf=false`, so its worktrees hold each file exactly as committed; before, every hunk was reported as "could not reverse-apply".
 
 ### Changed
 
+- CI also runs the unit tests on macOS and Windows.
 - Status is now labelled beta in the README and in the PyPI classifiers (`Development Status :: 4 - Beta`), until there are confirmed outside users. Version numbering stays 1.x.
 - Added `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`, `CITATION.cff`, issue and pull request templates, and README sections linking the other two tools of the verification toolkit and explaining how to cite.
 
