@@ -23,7 +23,7 @@ jobs:
       contents: read
       actions: read          # download the artifact of the triggering run
       pull-requests: write   # upsert the comment and the verdict label
-    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.2
+    uses: bhaskargurram-ai/proofcheck/.github/workflows/comment.yml@v1.0.3
     with:
-      proofcheck-ref: v1.0.2
+      proofcheck-ref: v1.0.3
       labels: true
