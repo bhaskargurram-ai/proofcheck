@@ -265,7 +265,7 @@ class AgentCliTest(unittest.TestCase):
                           "--out", str(self.out / "merged.md"))
         self.assertEqual(res.exit_code, 0, res.output)
         merged = json.loads((self.out / "merged.json").read_text(encoding="utf-8"))
-        self.assertEqual(merged["agent"]["status"], "evidence")
+        self.assertEqual(merged["agent"]["status"], "evidence", json.dumps(merged["agent"])[:3000])
         self.assertEqual(merged["claims"][0]["status"], "verified")
         self.assertIn("verified (agent test)", (self.out / "merged.md").read_text(encoding="utf-8"))
         # the privileged comment path accepts the merged result

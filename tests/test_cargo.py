@@ -273,7 +273,7 @@ class CargoEndToEndTest(unittest.TestCase):
         self.assertEqual([h["status"] for h in res["ablation"]["hunks"]], ["required"])
         self.assertTrue((target / MARKER_NAME).is_file())
         cli_bins = [p for p in (target / "debug" / "deps").iterdir() if p.name.startswith("cli-") and os.access(p, os.X_OK)
-                    and p.suffix == ""]
+                    and p.suffix in ("", ".exe")]
         self.assertGreaterEqual(len(cli_bins), 1)
         # A second run reuses the target dir: nothing is re-created from scratch.
         before = {p.name for p in (target / "debug" / "deps").iterdir()}

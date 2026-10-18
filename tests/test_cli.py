@@ -42,7 +42,7 @@ class RunCommandTest(RepoTestCase):
         res = self.invoke_run("good", "Title: Fix add\n\nFixes #1. Adds a regression test.", "--issue-body-file", str(issue))
         self.assertEqual(res.exit_code, 0, res.output)
         result = json.loads((self.out / "result.json").read_text(encoding="utf-8"))
-        self.assertEqual(result["verdict"], "evidence")
+        self.assertEqual(result["verdict"], "evidence", json.dumps(result)[:3000])
         self.assertEqual([c["status"] for c in result["claims"]], ["verified", "verified"])
         self.assertEqual(result["repro"][0]["status"], "reproduced_change")
         card = (self.out / "card.md").read_text(encoding="utf-8")
@@ -52,7 +52,7 @@ class RunCommandTest(RepoTestCase):
     def test_run_weak_pr_and_fail_on(self):
         res = self.invoke_run("weak", "Fixes #1 and makes it 2x faster. Adds tests.", "--fail-on", "no-evidence")
         result = json.loads((self.out / "result.json").read_text(encoding="utf-8"))
-        self.assertEqual(result["tests"]["status"], "no_evidence")
+        self.assertEqual(result["tests"]["status"], "no_evidence", json.dumps(result["tests"])[:3000])
         self.assertEqual(result["verdict"], "partial")  # adds_tests verified, others not
         self.assertEqual(res.exit_code, 0)
         res = self.invoke_run("broken", "Fixes #1", "--fail-on", "contradicted")
@@ -64,7 +64,8 @@ class RunCommandTest(RepoTestCase):
         bench = ("import calc, time\n"
                  "time.sleep(0.3 if calc.add(1, 1) != 2 else 0.05)\n")
         (self.out / "bench.py").write_text(bench, encoding="utf-8")
-        cfg.write_text(f'benchmark_command = ["{sys.executable}", "{self.out / "bench.py"}"]\nbenchmark_runs = 3\n'
+        cmd = json.dumps([sys.executable, str(self.out / "bench.py")])  # escapes Windows backslashes
+        cfg.write_text(f'benchmark_command = {cmd}\nbenchmark_runs = 3\n'
                        f'[test_env]\nPYTHONPATH = "."\n', encoding="utf-8")
         res = self.invoke_run("good", "Fixes #1, now 3x faster.", "--config", str(cfg))
         self.assertEqual(res.exit_code, 0, res.output)

@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -124,7 +125,7 @@ class ScenarioLoadingTest(TempDirCase):
         self.assertEqual(substitute("{x} {issue} {issue}", None), "{x} ? ?")
 
     def bad(self, toml, files=None, set_toml=None, msg=""):
-        root = make_set(self.tmp / msg.replace(" ", "_"), {"bad": (toml, files if files is not None else {"files/toy/a.py": "x"})},
+        root = make_set(self.tmp / re.sub(r"[^A-Za-z0-9_-]", "_", msg), {"bad": (toml, files if files is not None else {"files/toy/a.py": "x"})},
                         set_toml=set_toml)
         with self.assertRaises(ScenarioError) as cm:
             load_set(root)
