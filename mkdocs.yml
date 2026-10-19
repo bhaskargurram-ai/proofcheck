@@ -27,7 +27,7 @@ theme:
 nav:
   - Home: index.md
   - Quick start: guide/quickstart.md
-  - The card and the evidence map: guide/card.md
+  - The card and the evidence map: guide/the-card.md
   - Configuration and CLI: guide/configuration.md
   - Agent evidence (experimental): guide/agent.md
   - Agent in detail: AGENT.md
