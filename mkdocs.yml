@@ -1,0 +1,51 @@
+site_name: proofcheck
+site_description: Evidence that a pull request does what it claims
+site_url: https://bhaskargurram-ai.github.io/proofcheck/docs/
+repo_url: https://github.com/bhaskargurram-ai/proofcheck
+repo_name: bhaskargurram-ai/proofcheck
+edit_uri: edit/main/docs/
+docs_dir: docs
+exclude_docs: |
+  site/
+  requirements.txt
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      toggle: {icon: material/weather-sunny, name: Light mode}
+nav:
+  - Home: index.md
+  - Quick start: guide/quickstart.md
+  - The card and the evidence map: guide/the-card.md
+  - Configuration and CLI: guide/configuration.md
+  - Agent evidence (experimental): guide/agent.md
+  - Agent in detail: AGENT.md
+  - Security model: SECURITY_MODEL.md
+  - Comparison and FAQ: guide/compare.md
+  - Limitations and roadmap: guide/limitations.md
+  - Testing proofcheck: TESTING.md
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+plugins:
+  - search

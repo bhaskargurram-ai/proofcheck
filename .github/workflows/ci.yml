@@ -67,6 +67,23 @@ jobs:
                       print(f"::error title={case.get('name')}::{text}")
           EOF
 
+  # The documentation site must build (deployed by pages.yml from main).
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the documentation site
+        run: |
+          python -m pip install -q -r docs/requirements.txt -e .
+          mkdocs build --site-dir _site 2>&1 | tee mkdocs.log
+          grep -E "^(ERROR|WARNING)" mkdocs.log | sed 's/^/::warning title=mkdocs::/' || true
+          test -s _site/index.html
+
   # Build the distributions and use them the way a user would: install the
   # wheel into a fresh virtualenv (outside the checkout) and run the CLI,
   # `proofcheck init` and the demo against it.

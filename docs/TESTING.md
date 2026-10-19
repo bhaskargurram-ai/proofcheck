@@ -138,7 +138,7 @@ tested offline in `tests/test_e2e_harness.py`.
 The `python-toy` scenarios are: a real fix, a fake (pass → pass) fix, a fix
 with a smuggled unrelated hunk, a fix without a test (for the agent), a
 contradicted "no behaviour change" claim, a prompt-injection issue, and a
-workflow-file change. See [e2e/README.md](../e2e/README.md) for the scenario
+workflow-file change. See [e2e/README.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/e2e/README.md) for the scenario
 format, the target repository's requirements and the token permissions.
 
 What it does not cover: forks (the harness opens same-repository PRs; fork PRs
