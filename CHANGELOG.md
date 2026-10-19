@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- A documentation site (MkDocs) published with the landing page under `/docs/`. Its pages include the README's sections and `docs/*.md`, so the two can't drift apart.
+
 ## [1.0.3] - 2026-10-18
 
 ### Fixed

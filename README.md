@@ -45,6 +45,7 @@ It makes no attempt to guess whether a human or an AI wrote the code. It only lo
 - [Verification toolkit](#part-of-a-verification-toolkit) · [How to cite](#how-to-cite)
 - [Contributing](#contributing) · [License](#license)
 
+<!-- --8<-- [start:why] -->
 ## Why evidence instead of AI detection?
 
 Maintainers increasingly get pull requests that *look* right: tidy code, a confident description, "Fixes #123", a new test. Some come from people and some from AI tools. Classifying a PR as AI-generated answers a question maintainers don't need answered, and false positives hurt real contributors.
@@ -63,6 +64,9 @@ A good human PR and a good AI-assisted PR both pass. A sloppy PR from either sou
   <img src="https://raw.githubusercontent.com/bhaskargurram-ai/proofcheck/main/docs/assets/evidence-ladder.svg" alt="The evidence ladder from strongest to weakest: the PR's own test fails on base and passes on head; the issue's reproducer behaves differently on head; an agent-written test fails on base and passes on head; a changed hunk is required by that evidence. Below the line, no evidence: the changed test passes on both, or there are no tests or reproducers." width="880">
 </p>
 
+<!-- --8<-- [end:why] -->
+
+<!-- --8<-- [start:how] -->
 ## How it works
 
 <p align="center">
@@ -78,6 +82,9 @@ A good human PR and a good AI-assisted PR both pass. A sloppy PR from either sou
 3. **Verdicts.** Fixed rules match each claim to the evidence: ✅ verified, ❌ contradicted, or ⚠️ no evidence.
 4. **Card.** The result is posted as a single PR comment that is updated in place, written to the job summary, and summarised in a label: `proofcheck: verified`, `partial`, `contradicted` or `no evidence`.
 
+<!-- --8<-- [end:how] -->
+
+<!-- --8<-- [start:quickstart] -->
 ## Quick start
 
 ### 1. Install
@@ -235,6 +242,9 @@ The `bhaskargurram-ai/proofcheck@v1.0.3` composite action is still available for
 
 </details>
 
+<!-- --8<-- [end:quickstart] -->
+
+<!-- --8<-- [start:card] -->
 ## What's on the card
 
 | Section | What it shows |
@@ -359,6 +369,9 @@ This is real output of [`examples/demo`](https://github.com/bhaskargurram-ai/pro
 
 </details>
 
+<!-- --8<-- [end:card] -->
+
+<!-- --8<-- [start:evidencemap] -->
 ## Diff evidence map
 
 A fail → pass test proves the PR changed *something* the test checks. The diff evidence map shows **which parts of the diff** that evidence depends on. It is deterministic and uses no LLM.
@@ -375,6 +388,9 @@ The card shows a table of `file:lines`, status and which evidence broke, with a 
 
 The map runs only when there is at least one fail → pass test or behaviour-changing reproducer, and is capped by `ablation.max_hunks` (default 12) and `ablation.time_budget_s` (default 300 s). Turn it off with `--no-ablation` or `[ablation] enabled = false`.
 
+<!-- --8<-- [end:evidencemap] -->
+
+<!-- --8<-- [start:agent] -->
 ## Agent evidence (experimental)
 
 Many real PRs say "Fixes #123" but add no test, and many issues have no runnable reproducer. For exactly that case, proofcheck can ask an LLM to **write a reproduction test**, then run it on base and head itself. The agent is **off by default**.
@@ -402,6 +418,9 @@ Many real PRs say "Fixes #123" but add no test, and many issues have no runnable
 
 `proofcheck agent run` chains propose and verify with up to `agent.max_rounds` refinement rounds that feed execution output back to the model. Use it **only locally or in trusted contexts**: it runs untrusted code in the same process that holds the API key. In CI, the agent workflow keeps propose and verify in separate jobs. Details are in [docs/AGENT.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/AGENT.md).
 
+<!-- --8<-- [end:agent] -->
+
+<!-- --8<-- [start:security] -->
 ## Security model
 
 Running PR code safely is the core problem. proofcheck splits the work into three trust zones, connected only by artifacts:
@@ -419,6 +438,9 @@ Running PR code safely is the core problem. proofcheck splits the work into thre
 
 proofcheck raises the bar for low-effort PRs. It is **not** a sandbox and not a defence against a determined attacker: a malicious PR can still tamper with its own evidence inside the unprivileged job. Read [docs/SECURITY_MODEL.md](https://github.com/bhaskargurram-ai/proofcheck/blob/main/docs/SECURITY_MODEL.md) for the full threat model.
 
+<!-- --8<-- [end:security] -->
+
+<!-- --8<-- [start:compares] -->
 ## How proofcheck compares
 
 Different tools answer different questions. This table is our best reading of each category as of October 2026; corrections are welcome.
@@ -439,6 +461,9 @@ Different tools answer different questions. This table is our best reading of ea
 
 These tools are complementary. An AI reviewer comments on code quality and design, which proofcheck doesn't do at all. reprove's mutation testing measures how strong the tests are, which proofcheck doesn't do either. proofcheck focuses on one thing: whether the evidence backs the PR's claims.
 
+<!-- --8<-- [end:compares] -->
+
+<!-- --8<-- [start:configuration] -->
 ## Configuration
 
 Put a `proofcheck.toml` at the repository root, or a `[tool.proofcheck]` table in `pyproject.toml`. **The file is read from the PR's base commit**, so a PR cannot change how it is checked. `proofcheck init` writes a commented starting point.
@@ -524,6 +549,9 @@ runner = "pytest"                      # also: test_command, setup_command, test
 
 The optional LLM claim extractor sends PR text as untrusted data inside random delimiters, gives the model no tools, and accepts only strict JSON. Every claim must quote text that actually appears in the PR, and LLM-found claims can only add things to check.
 
+<!-- --8<-- [end:configuration] -->
+
+<!-- --8<-- [start:cli] -->
 ## CLI reference
 
 ```text
@@ -574,6 +602,9 @@ You can also run `python -m proofcheck …`.
 
 </details>
 
+<!-- --8<-- [end:cli] -->
+
+<!-- --8<-- [start:faq] -->
 ## FAQ
 
 <details>
@@ -625,6 +656,9 @@ Python first: pytest (most complete) and stdlib `unittest`. Jest is experimental
 
 </details>
 
+<!-- --8<-- [end:faq] -->
+
+<!-- --8<-- [start:limitations] -->
 ## Limitations
 
 - A fail-to-pass test proves the PR changes behaviour the test checks, not that the test checks the *right* behaviour.
@@ -637,6 +671,9 @@ Python first: pytest (most complete) and stdlib `unittest`. Jest is experimental
 - The Jest runner is experimental and has not been tested against many real projects.
 - Rust: only integration tests and inline `#[cfg(test)]` modules of changed files in existing crates are run (not doctests, benches or examples); `#[path]` module attributes, out-of-line `mod tests;` files and inline tests in new files are not handled. Build scripts and proc macros run on base and head like any test code.
 
+<!-- --8<-- [end:limitations] -->
+
+<!-- --8<-- [start:roadmap] -->
 ## Roadmap
 
 - Runners for **Vitest**, **Go** (`go test` + `go-junit-report`), cargo-nextest (JUnit, per-test timeouts) and a hardened Jest runner
@@ -646,6 +683,9 @@ Python first: pytest (most complete) and stdlib `unittest`. Jest is experimental
 - A GitHub App mode that runs checks in isolated sandboxes instead of the PR's CI job
 - Check-run annotations next to the PR comment
 
+<!-- --8<-- [end:roadmap] -->
+
+<!-- --8<-- [start:toolkit] -->
 ## Part of a verification toolkit
 
 proofcheck is one of three tools for checking whether scientific and ML computations are actually correct, including code written with AI assistance:
@@ -654,9 +694,14 @@ proofcheck is one of three tools for checking whether scientific and ML computat
 - **[stataudit](https://github.com/bhaskargurram-ai/stataudit)** (`pip install stataudit`): Does a statistical conclusion survive its own data, given test assumptions, alternatives and multiple comparisons?
 - **proofcheck** (`pip install proofcheck-ai`, this package): Does a code change do what it claims: fail-to-pass tests, reproducer replay, claim-to-evidence mapping?
 
+<!-- --8<-- [end:toolkit] -->
+
+<!-- --8<-- [start:cite] -->
 ## How to cite
 
 If you use proofcheck in research, please cite it. The repository's [`CITATION.cff`](https://github.com/bhaskargurram-ai/proofcheck/blob/main/CITATION.cff) has the metadata; GitHub's "Cite this repository" button turns it into APA or BibTeX.
+
+<!-- --8<-- [end:cite] -->
 
 ## Contributing
 
