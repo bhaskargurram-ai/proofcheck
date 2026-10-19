@@ -138,6 +138,10 @@ class GitHubClient:
         return out
 
     # -- writes ----------------------------------------------------------------------
+    def has_card_comment(self, number: int, bot_login: str | None = None) -> bool:
+        """True if the PR already has a proof card comment (same rules as :meth:`upsert_card_comment`)."""
+        return find_card_comment(self.list_comments(validate_number(number)), bot_login) is not None
+
     def upsert_card_comment(self, number: int, body: str, bot_login: str | None = None) -> tuple[str, int]:
         """Create the proof card comment or update the existing one.
 

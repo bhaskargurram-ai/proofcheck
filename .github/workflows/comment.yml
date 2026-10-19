@@ -30,6 +30,12 @@ on:
       python-version:
         type: string
         default: "3.12"
+      comment-when:
+        description: >-
+          When to post the card: always | not-verified (quiet mode: no new comment when the evidence fully
+          backs the PR; an existing card is still updated) | never (labels and job summary only).
+        type: string
+        default: always
       labels:
         description: "Set a `proofcheck: verified|partial|contradicted|no evidence` label (created if missing)."
         type: boolean
@@ -137,8 +143,13 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
           LABELS: ${{ inputs.labels }}
+          COMMENT_WHEN: ${{ inputs.comment-when }}
         run: |
           set -euo pipefail
           args=(comment --json "$RESULT" --pr "$PR_NUMBER" --expect-head-sha "$HEAD_SHA")
           if [ "$LABELS" = "true" ]; then args+=(--labels); fi
+          case "$COMMENT_WHEN" in
+            always|not-verified|never) args+=(--when "$COMMENT_WHEN") ;;
+            *) echo "::error::comment-when must be always, not-verified or never"; exit 1 ;;
+          esac
           "$PROOFCHECK_BIN" "${args[@]}"

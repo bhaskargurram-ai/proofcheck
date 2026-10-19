@@ -146,6 +146,54 @@ class CommentCommandTest(unittest.TestCase):
         res = self._invoke_comment(transport, "--expect-head-sha", "d" * 40)
         self.assertIn("result.json head commit does not match", res.output)
 
+    def _set_verdict(self, verdict):
+        doc = json.loads(self.result_path.read_text(encoding="utf-8"))
+        doc["verdict"] = verdict
+        self.result_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    def _api_with_card(self, existing: bool):
+        calls = []
+        card = [{"id": 5, "body": CARD_MARKER + " old", "user": {"login": "github-actions[bot]", "type": "Bot"}}]
+
+        def transport(method, url, headers, body, timeout):
+            calls.append((method, url, body))
+            if method == "GET" and "/files" in url:
+                return HTTPResponse(200, b"[]")
+            if method == "GET" and "/comments" in url:
+                return HTTPResponse(200, json.dumps(card if existing else []).encode())
+            return HTTPResponse(201 if method == "POST" else 200, b'{"id": 79}')
+
+        return transport, calls
+
+    def test_quiet_mode_skips_a_new_card_for_verified_prs(self):
+        self._set_verdict("evidence")
+        transport, calls = self._api_with_card(existing=False)
+        res = self._invoke_comment(transport, "--when", "not-verified")
+        self.assertEqual(res.exit_code, 0, res.output)
+        self.assertIn("no card posted", res.output)
+        self.assertFalse(any(m in ("POST", "PATCH") for m, _, _ in calls))
+
+    def test_quiet_mode_updates_an_existing_card(self):
+        self._set_verdict("evidence")
+        transport, calls = self._api_with_card(existing=True)
+        res = self._invoke_comment(transport, "--when", "not-verified")
+        self.assertEqual(res.exit_code, 0, res.output)
+        self.assertTrue(any(m == "PATCH" and url.endswith("/issues/comments/5") for m, url, _ in calls))
+
+    def test_quiet_mode_posts_when_not_verified(self):
+        self._set_verdict("no_evidence")
+        transport, calls = self._api_with_card(existing=False)
+        res = self._invoke_comment(transport, "--when", "not-verified")
+        self.assertEqual(res.exit_code, 0, res.output)
+        self.assertTrue(any(m == "POST" for m, _, _ in calls))
+
+    def test_when_never_posts_nothing(self):
+        self._set_verdict("contradicted")
+        transport, calls = self._api_with_card(existing=True)
+        res = self._invoke_comment(transport, "--when", "never")
+        self.assertEqual(res.exit_code, 0, res.output)
+        self.assertFalse(any(m in ("POST", "PATCH") for m, _, _ in calls))
+
     def test_context_file_roundtrip(self):
         event = self.dir / "event.json"
         event.write_text(json.dumps({"pull_request": {"number": 3, "title": "Fix it", "body": "Fixes #9"}}), encoding="utf-8")

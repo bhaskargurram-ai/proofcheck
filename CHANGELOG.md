@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Quiet mode: `proofcheck comment --when not-verified|never` and the comment workflow's `comment-when` input. With `not-verified`, a PR whose evidence fully backs it gets no new comment (an existing card is still updated); with `never`, only labels and the job summary. The README shows how to run proofcheck only on PRs with a `proofcheck` label.
 - A documentation site (MkDocs) published with the landing page under `/docs/`. Its pages include the README's sections and `docs/*.md`, so the two can't drift apart.
 
 ## [1.0.3] - 2026-10-18
