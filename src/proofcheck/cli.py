@@ -220,12 +220,19 @@ def context_cmd(event_path: str | None, max_issues: int, out_path: str, pr_numbe
 @click.option("--dry-run", is_flag=True, help="Print the card instead of posting it.")
 @click.option("--labels/--no-labels", default=False, show_default=True,
               help="Also set a `proofcheck: <verdict>` label on the PR (created if missing; stale ones removed).")
+@click.option("--when", "when", type=click.Choice(["always", "not-verified", "never"]), default="always",
+              show_default=True,
+              help="When to post the card: always; only when the verdict is not `evidence` (an existing card is "
+                   "still updated, so it never goes stale); or never (labels only).")
 def comment_cmd(json_path: str, pr_number: str | None, repo_slug: str | None, bot_login: str | None,
-                expect_head_sha: str | None, check_pr_files: bool, dry_run: bool, labels: bool = False) -> None:
+                expect_head_sha: str | None, check_pr_files: bool, dry_run: bool, labels: bool = False,
+                when: str = "always") -> None:
     """Post or update the proof card comment on a pull request.
 
     The result file is treated as untrusted: it is validated against the
     schema and the card is re-rendered from it (card.md is never posted).
+    With ``--when not-verified`` a PR whose evidence fully backs it gets no
+    new comment (quiet mode for busy repositories).
     """
     p = Path(json_path)
     if p.stat().st_size > MAX_RESULT_BYTES:
@@ -267,10 +274,16 @@ def comment_cmd(json_path: str, pr_number: str | None, repo_slug: str | None, bo
             pr = client.get_pull(number)
             if str((pr.get("head") or {}).get("sha", "")).lower() != expected:
                 raise click.ClickException(f"PR #{number} head does not match --expect-head-sha (PR updated, or wrong PR number)")
-        action, cid = client.upsert_card_comment(number, card, bot_login=bot_login)
+        post = when == "always" or (
+            when == "not-verified" and (result["verdict"] != "evidence" or client.has_card_comment(number, bot_login)))
+        if post:
+            action, cid = client.upsert_card_comment(number, card, bot_login=bot_login)
     except GitHubError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"{action} proof card comment {cid} on #{number}")
+    if post:
+        click.echo(f"{action} proof card comment {cid} on #{number}")
+    else:
+        click.echo(f"no card posted on #{number} (--when {when}, verdict {result['verdict']})")
     if labels:
         try:
             added, removed = client.sync_verdict_label(number, result["verdict"])

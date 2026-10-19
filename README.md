@@ -162,6 +162,8 @@ jobs:
       labels: true
 ```
 
+**Quiet and opt-in modes.** On a busy repository, add `comment-when: not-verified` to the comment workflow's `with:` (from 1.0.4). A PR whose evidence fully backs it then gets no new comment; an existing card is still updated so it never goes stale, and the label and job summary are always set. `comment-when: never` sets labels only. To run proofcheck only on PRs a maintainer labels, add `labeled` to the `pull_request` types in `proofcheck.yml` and give its job `if: contains(github.event.pull_request.labels.*.name, 'proofcheck')`.
+
 **`.github/workflows/proofcheck-agent.yml`** *(optional, experimental)* tries to write a reproduction test when a `fixes #N` claim has no evidence. It runs only for PRs labelled `proofcheck:agent` or opened by owners, members and collaborators, unless you set `run-for: everyone`.
 
 ```yaml
