@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import _helpers
@@ -19,8 +20,8 @@ from proofcheck import cli
 from proofcheck.card import render_card
 from proofcheck.check import PRContext, run_check
 from proofcheck.config import ConfigError, config_from_dict, parse_config_text
-from proofcheck.init_cmd import detect_projects, init_repo
-from proofcheck.projects import ProjectSet, build_projects, project_for, split_test_id
+from proofcheck.init_cmd import InitError, detect_projects, detect_runner, init_repo
+from proofcheck.projects import ProjectSet, _npm_ci_command, build_projects, project_for, split_test_id
 from proofcheck.result import ResultValidationError, validate_result
 
 
@@ -236,9 +237,11 @@ class TwoProjectRunTest(unittest.TestCase):
 
     def test_validator_rejects_bad_project_entries(self):
         base = {"schema": "proofcheck/result", "version": 1, "base": "a" * 40, "head": "b" * 40, "verdict": "evidence"}
-        ok = dict(base, tests={"status": "evidence", "projects": [{"name": "sdk", "path": "sdk", "runner": "pytest",
+        ok = dict(base, tests={"status": "evidence", "projects": [{"name": "sdk", "path": "sdk", "runner": "vitest",
                                                                     "status": "evidence", "counts": {"fail_to_pass": 1}}]})
-        self.assertEqual(validate_result(ok)["tests"]["projects"][0]["counts"]["fail_to_pass"], 1)
+        validated = validate_result(ok)
+        self.assertEqual(validated["tests"]["projects"][0]["runner"], "vitest")
+        self.assertEqual(validated["tests"]["projects"][0]["counts"]["fail_to_pass"], 1)
         self.assertNotIn("projects", validate_result(dict(base, tests={"status": "no_tests"}))["tests"])
         for bad in ({"name": "<b>", "runner": "pytest", "status": "evidence"},
                     {"name": "x", "runner": "make", "status": "evidence"},
@@ -389,6 +392,106 @@ class InitProjectsTest(unittest.TestCase):
         wf = (self.root / ".github/workflows/proofcheck.yml").read_text(encoding="utf-8")
         self.assertIn("install-command: ''", wf)
         self.assertIn("timeout-minutes: 90", wf)
+
+    def test_vitest_detection_and_explicit_override(self):
+        (self.root / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "^3.0.0"},
+        }), encoding="utf-8")
+        self.assertEqual(detect_runner(self.root)[0], "vitest")
+        projects, skipped = detect_projects(self.root)
+        self.assertEqual([(p.path, p.runner) for p in projects], [(".", "vitest")])
+        self.assertEqual(skipped, [])
+
+        nested = self.root / "nested"
+        nested.mkdir()
+        (nested / "package.json").write_text(json.dumps({
+            "dependencies": {"vitest": "^3.0.0"},
+        }), encoding="utf-8")
+        projects, skipped = detect_projects(self.root)
+        self.assertEqual([(p.path, p.runner) for p in projects],
+                         [(".", "vitest"), ("nested", "vitest")])
+        self.assertEqual(skipped, [])
+
+        explicit = self.root / "explicit"
+        explicit.mkdir()
+        (explicit / "package.json").write_text(json.dumps({
+            "dependencies": {"jest": "^29", "vitest": "^3.0.0"},
+        }), encoding="utf-8")
+        (explicit / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        res = init_repo(explicit, runner="vitest")
+        self.assertEqual(res.runner, "vitest")
+
+    def test_nested_vitest_project_generates_install_configuration(self):
+        (self.root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+        nested = self.root / "nested"
+        nested.mkdir()
+        (nested / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "^3.0.0"},
+        }), encoding="utf-8")
+        (nested / "package-lock.json").write_text("{}\n", encoding="utf-8")
+
+        res = init_repo(self.root)
+
+        workflow = (self.root / ".github/workflows/proofcheck.yml").read_text(encoding="utf-8")
+        config = (self.root / "proofcheck.toml").read_text(encoding="utf-8")
+        self.assertNotIn("npm ci --prefix", workflow)
+        self.assertIn('setup_command = "npm ci"', config)
+        self.assertIn('node-version: "20"', workflow)
+        self.assertNotIn("jest-junit", "\n".join(res.next_steps))
+
+    def test_generated_javascript_setup_resolves_npm_without_shell(self):
+        node = self.root / "node.exe"
+        npm_root = self.root / "npm-bin"
+        npm_shim = npm_root / "npm.cmd"
+        cli = npm_root / "node_modules" / "npm" / "bin" / "npm-cli.js"
+        cli.parent.mkdir(parents=True)
+        node.write_text("", encoding="utf-8")
+        cli.write_text("", encoding="utf-8")
+        npm_shim.write_text("node_modules\\npm\\bin\\npm-cli.js", encoding="utf-8")
+        with mock.patch("proofcheck.projects.shutil.which",
+                        side_effect=lambda name: str(node) if name == "node" else str(npm_shim)):
+            command, error = _npm_ci_command()
+        self.assertIsNone(error)
+        self.assertEqual(command, [str(node), str(cli), "ci"])
+
+    def test_generated_javascript_setup_resolves_linux_npm_symlink(self):
+        node = self.root / "node"
+        npm_root = self.root / "npm-bin"
+        npm_link = npm_root / "npm"
+        cli = npm_root / "node_modules" / "npm" / "bin" / "npm-cli.js"
+        cli.parent.mkdir(parents=True)
+        node.write_text("", encoding="utf-8")
+        cli.write_text("", encoding="utf-8")
+        try:
+            npm_link.symlink_to(cli)
+        except OSError as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+        with mock.patch("proofcheck.projects.shutil.which",
+                        side_effect=lambda name: str(node) if name == "node" else str(npm_link)):
+            command, error = _npm_ci_command()
+        self.assertIsNone(error)
+        self.assertEqual(command, [str(node), str(cli.resolve()), "ci"])
+
+    def test_mixed_framework_detection_is_ambiguous(self):
+        (self.root / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run", "test:unit": "jest --ci"},
+            "dependencies": {"jest": "^29", "vitest": "^3.0.0"},
+        }), encoding="utf-8")
+        self.assertEqual(detect_runner(self.root)[0], "ambiguous")
+        with self.assertRaisesRegex(InitError, "--runner jest or --runner vitest"):
+            init_repo(self.root)
+
+        nested = self.root / "nested"
+        nested.mkdir()
+        (nested / "package.json").write_text(json.dumps({
+            "dependencies": {"jest": "^29", "vitest": "^3.0.0"},
+        }), encoding="utf-8")
+        projects, skipped = detect_projects(self.root)
+        self.assertEqual([(p.path, p.runner) for p in projects], [(".", "ambiguous")])
+        self.assertIn(("nested/package.json", "package.json has both Jest and Vitest dependencies; specify --runner jest or --runner vitest"),
+                      skipped)
 
 
 if __name__ == "__main__":

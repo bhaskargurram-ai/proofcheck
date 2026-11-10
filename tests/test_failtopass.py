@@ -1,6 +1,9 @@
 """End-to-end tests of the fail-to-pass check with real git worktrees."""
 
+import json
 import os
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +13,8 @@ import _helpers  # noqa: F401  (sets up sys.path)
 from _helpers import FAKE_PYTEST, RepoTestCase, scrubbed_env
 
 from proofcheck import git as gitmod
+from proofcheck.check import PRContext, run_check
+from proofcheck.config import load_config_from_ref
 from proofcheck.failtopass import (
     FAIL_ON_HEAD,
     FAIL_TO_PASS,
@@ -22,7 +27,8 @@ from proofcheck.failtopass import (
     copy_files_from_ref,
     run_fail_to_pass,
 )
-from proofcheck.runners import PytestRunner, UnittestRunner, get_runner
+from proofcheck.runners import PytestRunner, UnittestRunner, VitestRunner, get_runner
+from proofcheck.projects import _npm_ci_command
 
 
 def run_ftp(repo_path: Path, head: str, runner, check_old_tests: bool = False):
@@ -114,6 +120,114 @@ class FailToPassPytestRunnerTest(RepoTestCase):
         self.assertNotEqual(base, head)
 
 
+class VitestEndToEndTest(unittest.TestCase):
+    """Opt-in integration test for real worktree setup and Vitest execution."""
+
+    def test_real_vitest_fix_is_fail_to_pass(self):
+        if os.environ.get("PROOFCHECK_VITEST_E2E") != "1":
+            self.skipTest("set PROOFCHECK_VITEST_E2E=1 to run the npm/Vitest integration test")
+        if not shutil.which("node") or not shutil.which("npm"):
+            self.skipTest("Node.js and npm are required for the Vitest integration test")
+
+        npm_command, npm_error = _npm_ci_command()
+        if npm_error:
+            self.fail(npm_error)
+
+        from _helpers import GitRepo
+
+        repo = GitRepo()
+        self.addCleanup(repo.cleanup)
+        package = {
+            "private": True,
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "2.1.9"},
+        }
+        config = """runner = "vitest"
+setup_command = "npm ci"
+timeout = 180
+
+[ablation]
+enabled = false
+"""
+        test_source = """import { describe, expect, it } from "vitest";
+import { add } from "../src/math.js";
+
+describe("math", () => {
+  it("adds two numbers", () => {
+    expect(add(2, 3)).toBe(5);
+  });
+});
+"""
+        repo.write({
+            "package.json": json.dumps(package, indent=2) + "\n",
+            "proofcheck.toml": config,
+            "src/math.js": "export function add(a, b) { return a - b; }\n",
+            "tests/math.test.js": test_source,
+        })
+        lock_command = [*npm_command[:2], "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]
+        lock_result = subprocess.run(
+            lock_command,
+            cwd=repo.path,
+            env=scrubbed_env(),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            shell=False,
+        )
+        if lock_result.returncode != 0:
+            self.fail(f"could not create the committed package-lock.json:\n{lock_result.stdout}\n{lock_result.stderr}")
+        self.assertTrue((repo.path / "package-lock.json").is_file())
+        self.assertFalse((repo.path / "node_modules").exists())
+        base_sha = repo.commit({}, "base")
+
+        repo.branch("head", start=base_sha)
+        head_sha = repo.commit({
+            "src/math.js": "export function add(a, b) { return a + b; }\n",
+            "tests/math.test.js": "// The test remains logically identical across the fix.\n" + test_source,
+        }, "fix addition")
+
+        base_ref = "refs/heads/main"
+        head_ref = "refs/heads/head"
+        self.assertEqual(_helpers.git(repo.path, "rev-parse", base_ref), base_sha)
+        self.assertEqual(_helpers.git(repo.path, "rev-parse", head_ref), head_sha)
+        self.assertNotEqual(_helpers.git(repo.path, "rev-parse", base_ref), _helpers.git(repo.path, "rev-parse", head_ref))
+        changed_files = _helpers.git(repo.path, "diff", "--name-only", f"{base_ref}..{head_ref}").splitlines()
+        self.assertIn("src/math.js", changed_files)
+        self.assertIn("tests/math.test.js", changed_files)
+        for ref in (base_ref, head_ref):
+            self.assertEqual(_helpers.git(repo.path, "show", f"{ref}:package-lock.json"), _helpers.git(
+                repo.path, "show", f"{base_ref}:package-lock.json",
+            ))
+            self.assertEqual(_helpers.git(repo.path, "show", f"{ref}:proofcheck.toml"), config.rstrip())
+
+        repo.checkout(base_ref)
+        cfg = load_config_from_ref(repo.path, base_ref)
+        self.assertEqual(cfg.runner, "vitest")
+        self.assertEqual(cfg.setup_command, ["npm", "ci"])
+        self.assertEqual(cfg.timeout, 180)
+        cfg.ablation.enabled = False
+        result = run_check(
+            repo.path,
+            base_sha,
+            head_ref,
+            cfg,
+            PRContext(title="Fix addition", body=""),
+            environ=scrubbed_env(),
+        )
+
+        self.assertEqual(result["tests"]["status"], "evidence", result)
+        self.assertEqual(result["tests"]["runner"], "vitest")
+        matching = [test for test in result["tests"]["tests"] if test["touched"]]
+        self.assertEqual(len(matching), 1, result["tests"])
+        self.assertEqual(matching[0]["classification"], "fail_to_pass")
+        self.assertEqual(matching[0]["test_id"], "tests/math.test.js::math > adds two numbers")
+        self.assertEqual(matching[0]["file"], "tests/math.test.js")
+        self.assertEqual(result["tests"]["base_run"]["returncode"], 1)
+        self.assertEqual(result["tests"]["head_run"]["returncode"], 0)
+        self.assertFalse((repo.path / "node_modules").exists())
+        self.assertFalse(result["notes"], result["notes"])
+
+
 class WorktreeTest(RepoTestCase):
     def test_worktree_removed_on_exception(self):
         before = gitmod.list_worktrees(self.repo.path)
@@ -170,6 +284,39 @@ class RunnerConfigTest(unittest.TestCase):
         env = r.env_for(Path("."), "/tmp/x/report.xml")
         self.assertEqual(env["JEST_JUNIT_OUTPUT_NAME"], "report.xml")
         self.assertTrue(r.test_belongs_to("/w/src/sum.test.ts::sum adds", "src/sum.test.ts"))
+
+    def test_vitest_runner(self):
+        r = get_runner("vitest")
+        self.assertIsInstance(r, VitestRunner)
+        for path in ("src/sum.test.js", "src/sum.test.ts", "src/sum.spec.jsx", "src/sum.spec.tsx"):
+            self.assertTrue(r.is_test_module(path))
+        self.assertFalse(r.is_test_module("src/sum.js"))
+        self.assertFalse(r.is_test_module("src/sum.ts"))
+
+        cmd = r.build_command(["tests/math.test.js"], "/tmp/x/report.xml")
+        self.assertEqual(cmd, [
+            "node", "node_modules/vitest/vitest.mjs", "run", "--reporter=junit",
+            "--outputFile=/tmp/x/report.xml", "tests/math.test.js",
+        ])
+        self.assertNotIn("jest-junit", " ".join(cmd))
+        self.assertEqual(r.env_for(Path("."), "/tmp/x/report.xml"), {})
+
+        self.assertTrue(r.test_belongs_to(
+            "tests/math.test.js::math operations > adds two numbers",
+            "tests/math.test.js",
+        ))
+        self.assertTrue(r.test_belongs_to(
+            r".\tests\math.test.js::math operations > adds two numbers",
+            "./tests/math.test.js",
+        ))
+        self.assertFalse(r.test_belongs_to(
+            "other/tests/math.test.js::math operations > adds two numbers",
+            "tests/math.test.js",
+        ))
+        self.assertFalse(r.test_belongs_to(
+            "tests/math.test.js.bak::math operations > adds two numbers",
+            "tests/math.test.js",
+        ))
 
     def test_unknown_runner(self):
         with self.assertRaises(ValueError):

@@ -11,8 +11,8 @@ A runner knows three things about an ecosystem:
    evidence).
 
 Built-in runners: ``pytest`` (default), ``unittest`` (stdlib; useful when
-pytest is not installed), ``jest`` (experimental, via ``jest-junit``) and
-``cargo`` (Rust; see :mod:`proofcheck.cargo`).
+pytest is not installed), ``jest`` (experimental, via ``jest-junit``),
+``vitest`` and ``cargo`` (Rust; see :mod:`proofcheck.cargo`).
 """
 
 from __future__ import annotations
@@ -362,14 +362,40 @@ class JestRunner(TestRunner):
         return classname.replace("\\", "/").endswith(path)
 
 
+class VitestRunner(TestRunner):
+    """Runs Vitest with its built-in JUnit reporter."""
+
+    name = "vitest"
+    test_patterns = ("*.test.js", "*.test.jsx", "*.test.ts", "*.test.tsx", "*.test.mjs", "*.test.cjs",
+                     "*.spec.js", "*.spec.jsx", "*.spec.ts", "*.spec.tsx", "*.spec.mjs", "*.spec.cjs",
+                     "__tests__/*", "*/__tests__/*", "__mocks__/*", "*/__mocks__/*", "__fixtures__/*", "*/__fixtures__/*")
+    module_patterns = ("*.test.js", "*.test.jsx", "*.test.ts", "*.test.tsx", "*.test.mjs", "*.test.cjs",
+                       "*.spec.js", "*.spec.jsx", "*.spec.ts", "*.spec.tsx", "*.spec.mjs", "*.spec.cjs",
+                       "__tests__/*.js", "*/__tests__/*.js", "__tests__/*.ts", "*/__tests__/*.ts")
+    # Invoke Vitest directly because Windows npx.cmd shims cannot run with shell=False.
+    default_command = ("node", "node_modules/vitest/vitest.mjs", "run", "--reporter=junit",
+                       f"--outputFile={JUNIT_PLACEHOLDER}", TESTS_PLACEHOLDER)
+
+    def test_belongs_to(self, test_id: str, path: str) -> bool:
+        def normalize(value: str) -> str:
+            value = value.replace("\\", "/")
+            while value.startswith("./"):
+                value = value[2:]
+            return value
+
+        classname = normalize(test_id.split("::", 1)[0])
+        return classname == normalize(path)
+
+
 RUNNERS: dict[str, type[TestRunner]] = {
     "pytest": PytestRunner,
     "unittest": UnittestRunner,
     "jest": JestRunner,
+    "vitest": VitestRunner,
 }
 
 #: Every runner name accepted in configuration and on the command line.
-RUNNER_NAMES = ("pytest", "unittest", "jest", "cargo")
+RUNNER_NAMES = ("pytest", "unittest", "jest", "vitest", "cargo")
 
 
 def _runner_class(name: str) -> type[TestRunner]:

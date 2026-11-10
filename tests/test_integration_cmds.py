@@ -21,7 +21,7 @@ from proofcheck.config import parse_config_text
 from proofcheck.github_api import VERDICT_LABELS, GitHubClient
 from proofcheck.httpclient import HTTPResponse
 from proofcheck.init_cmd import (AGENT_PATH, COMMENT_PATH, CONFIG_PATH, EVIDENCE_PATH, InitError, agent_caller,
-                                 comment_caller, detect_runner, evidence_caller, init_repo)
+                                 comment_caller, detect_projects, detect_runner, evidence_caller, init_repo)
 
 RESULT = {"schema": "proofcheck/result", "version": 1, "base": "a" * 40, "head": "b" * 40, "verdict": "partial",
           "pr_number": 7, "claims": [{"type": "fixes_issue", "text": "fixes #1", "status": "unverified",
@@ -204,6 +204,13 @@ class InitTest(unittest.TestCase):
         cases = [
             ({"package.json": json.dumps({"devDependencies": {"jest": "^29"}})}, "jest"),
             ({"package.json": json.dumps({"scripts": {"test": "jest --ci"}})}, "jest"),
+            ({"package.json": json.dumps({"devDependencies": {"vitest": "^3"}})}, "vitest"),
+            ({"package.json": json.dumps({"dependencies": {"vitest": "^3"}})}, "vitest"),
+            ({"package.json": json.dumps({"scripts": {"test": "vitest run"}})}, "vitest"),
+            ({"package.json": json.dumps({"scripts": {"test:unit": "vitest run"}})}, "vitest"),
+            ({"package.json": json.dumps({"dependencies": {"jest": "^29", "vitest": "^3"},
+                                           "scripts": {"test": "vitest run"}})}, "vitest"),
+            ({"package.json": json.dumps({"dependencies": {"jest": "^29", "vitest": "^3"}})}, "ambiguous"),
             ({"pyproject.toml": "[tool.pytest.ini_options]\n"}, "pytest"),
             ({"pyproject.toml": "[project]\noptional-dependencies = {dev = ['pytest>=7']}\n"}, "pytest"),
             ({"pytest.ini": "[pytest]\n"}, "pytest"),
@@ -219,6 +226,76 @@ class InitTest(unittest.TestCase):
                     (d / name).parent.mkdir(parents=True, exist_ok=True)
                     (d / name).write_text(text, encoding="utf-8")
                 self.assertEqual(detect_runner(d)[0], want)
+
+    def test_workspace_member_promotes_runner_to_root(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}), encoding="utf-8")
+        member = d / "packages" / "web"
+        member.mkdir(parents=True)
+        (member / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+        }), encoding="utf-8")
+        self.assertEqual(detect_runner(d)[0], "vitest")
+        projects, skipped = detect_projects(d)
+        self.assertEqual([(p.path, p.runner) for p in projects], [(".", "vitest")])
+        self.assertEqual(skipped, [])
+
+    def test_workspace_member_script_takes_precedence_over_dependency(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}), encoding="utf-8")
+        (d / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        member = d / "packages" / "web"
+        member.mkdir(parents=True)
+        (member / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"jest": "^29"},
+        }), encoding="utf-8")
+        self.assertEqual(detect_runner(d)[0], "vitest")
+        result = init_repo(d)
+        self.assertEqual(result.runner, "vitest")
+
+    def test_conflicting_workspace_member_runners_are_actionable(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}), encoding="utf-8")
+        for name, dependency in (("web", "vitest"), ("admin", "jest")):
+            member = d / "packages" / name
+            member.mkdir(parents=True)
+            (member / "package.json").write_text(json.dumps({
+                "devDependencies": {dependency: "^3"},
+            }), encoding="utf-8")
+        runner, reason = detect_runner(d)
+        self.assertEqual(runner, "ambiguous")
+        self.assertIn("--runner jest or --runner vitest", reason)
+
+    def test_root_and_workspace_runners_are_ambiguous(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({
+            "workspaces": ["packages/*"],
+            "devDependencies": {"vitest": "^3"},
+        }), encoding="utf-8")
+        member = d / "packages" / "web"
+        member.mkdir(parents=True)
+        (member / "package.json").write_text(json.dumps({
+            "devDependencies": {"jest": "^29"},
+        }), encoding="utf-8")
+        runner, reason = detect_runner(d)
+        self.assertEqual(runner, "ambiguous")
+        self.assertIn("--runner jest or --runner vitest", reason)
+        with self.assertRaises(InitError) as cm:
+            init_repo(d)
+        self.assertIn("--runner jest or --runner vitest", str(cm.exception))
+
+    def test_workspace_star_does_not_match_deep_package(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}), encoding="utf-8")
+        deep = d / "packages" / "group" / "web"
+        deep.mkdir(parents=True)
+        (deep / "package.json").write_text(json.dumps({
+            "devDependencies": {"vitest": "^3"},
+        }), encoding="utf-8")
+        projects, skipped = detect_projects(d)
+        self.assertEqual([(p.path, p.runner) for p in projects], [("packages/group/web", "vitest")])
+        self.assertEqual(skipped, [])
 
     def test_writes_files_and_refuses_overwrite(self):
         d = tmpdir(self)
@@ -267,19 +344,124 @@ class InitTest(unittest.TestCase):
     def test_cli_and_bad_ref(self):
         d = tmpdir(self)
         (d / "package.json").write_text(json.dumps({"devDependencies": {"jest": "29"}}), encoding="utf-8")
+        (d / "package-lock.json").write_text("{}\n", encoding="utf-8")
         res = CliRunner().invoke(cli.main, ["init", "--repo", str(d), "--agent", "--ref", "0123456789abcdef0123456789abcdef01234567"])
         self.assertEqual(res.exit_code, 0, res.output)
         self.assertIn("Detected test runner: jest", res.output)
         self.assertIn("jest-junit", res.output)
         self.assertIn("gh secret set PROOFCHECK_LLM_API_KEY", res.output)
         self.assertIn('node-version: "20"', (d / EVIDENCE_PATH).read_text(encoding="utf-8"))
-        self.assertIn("install-command: 'npm ci'", (d / AGENT_PATH).read_text(encoding="utf-8"))
+        self.assertIn("install-command: ''", (d / AGENT_PATH).read_text(encoding="utf-8"))
+        self.assertIn('setup_command = "npm ci"', (d / CONFIG_PATH).read_text(encoding="utf-8"))
         res = CliRunner().invoke(cli.main, ["init", "--repo", str(d)])
         self.assertNotEqual(res.exit_code, 0)
         self.assertIn("refusing to overwrite", res.output)
         for bad in ("v1\nevil: true", "${{ github.token }}", "../x", "-x"):
             with self.assertRaises(InitError, msg=bad):
                 init_repo(tmpdir(self), ref=bad)
+
+    def test_vitest_init_workflows(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "^3"},
+        }), encoding="utf-8")
+        (d / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        res = CliRunner().invoke(cli.main, ["init", "--repo", str(d), "--agent"], catch_exceptions=False)
+        self.assertEqual(res.exit_code, 0, res.output)
+        self.assertIn("Detected test runner: vitest", res.output)
+        evidence = (d / EVIDENCE_PATH).read_text(encoding="utf-8")
+        agent = (d / AGENT_PATH).read_text(encoding="utf-8")
+        config = (d / CONFIG_PATH).read_text(encoding="utf-8")
+        for workflow in (evidence, agent):
+            self.assertIn('node-version: "20"', workflow)
+            self.assertIn("install-command: ''", workflow)
+        self.assertIn('runner = "vitest"', config)
+        self.assertIn('setup_command = "npm ci"', config)
+        self.assertNotIn("jest-junit", res.output + evidence + agent)
+
+    def test_explicit_vitest_init(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({"devDependencies": {"vitest": "^3"}}), encoding="utf-8")
+        (d / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        res = CliRunner().invoke(cli.main, ["init", "--repo", str(d), "--runner", "vitest"], catch_exceptions=False)
+        self.assertEqual(res.exit_code, 0, res.output)
+        self.assertIn('runner = "vitest"', (d / CONFIG_PATH).read_text(encoding="utf-8"))
+        evidence = (d / EVIDENCE_PATH).read_text(encoding="utf-8")
+        self.assertIn('node-version: "20"', evidence)
+        self.assertIn("install-command: ''", evidence)
+        self.assertIn('setup_command = "npm ci"', (d / CONFIG_PATH).read_text(encoding="utf-8"))
+        self.assertNotIn("jest-junit", res.output + evidence)
+
+    def test_mixed_python_and_nested_vitest_keeps_only_python_workflow_install(self):
+        d = tmpdir(self)
+        (d / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+        nested = d / "nested"
+        nested.mkdir()
+        (nested / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "^3"},
+        }), encoding="utf-8")
+        (nested / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        res = CliRunner().invoke(cli.main, ["init", "--repo", str(d)], catch_exceptions=False)
+        self.assertEqual(res.exit_code, 0, res.output)
+        config = (d / CONFIG_PATH).read_text(encoding="utf-8")
+        workflow = (d / EVIDENCE_PATH).read_text(encoding="utf-8")
+        self.assertIn('setup_command = "npm ci"', config)
+        self.assertIn("install-command: 'pip install", workflow)
+        self.assertNotIn("npm ci", workflow)
+        self.assertIn('node-version: "20"', workflow)
+
+    def test_vitest_init_requires_committed_lockfile(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({"devDependencies": {"vitest": "^3"}}), encoding="utf-8")
+        res = CliRunner().invoke(cli.main, ["init", "--repo", str(d)], catch_exceptions=False)
+        self.assertNotEqual(res.exit_code, 0)
+        self.assertIn("package-lock.json or npm-shrinkwrap.json", res.output)
+        self.assertIn("run npm install and commit the lockfile", res.output)
+
+    def test_nested_workspace_uses_root_lockfile_and_is_not_separate_project(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({
+            "workspaces": ["packages/*"],
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "^3"},
+        }), encoding="utf-8")
+        (d / "package-lock.json").write_text("{}\n", encoding="utf-8")
+        package = d / "packages" / "web"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "^3"},
+        }), encoding="utf-8")
+        res = init_repo(d)
+        self.assertEqual(res.projects, [])
+        config = (d / CONFIG_PATH).read_text(encoding="utf-8")
+        self.assertNotIn('path = "packages/web"', config)
+        self.assertIn('setup_command = "npm ci"', config)
+
+    def test_nested_npm_project_requires_its_own_lockfile(self):
+        d = tmpdir(self)
+        (d / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+        nested = d / "nested"
+        nested.mkdir()
+        (nested / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run"},
+            "devDependencies": {"vitest": "^3"},
+        }), encoding="utf-8")
+        with self.assertRaises(InitError) as cm:
+            init_repo(d)
+        self.assertIn("nested", str(cm.exception))
+        self.assertIn("package-lock.json or npm-shrinkwrap.json", str(cm.exception))
+
+    def test_ambiguous_root_init_reports_action(self):
+        d = tmpdir(self)
+        (d / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run", "test:unit": "jest --ci"},
+        }), encoding="utf-8")
+        res = CliRunner().invoke(cli.main, ["init", "--repo", str(d)])
+        self.assertNotEqual(res.exit_code, 0)
+        self.assertIn("--runner jest or --runner vitest", res.output)
 
     def test_examples_match_generated_callers(self):
         ex = _helpers.ROOT / "examples" / "workflows"

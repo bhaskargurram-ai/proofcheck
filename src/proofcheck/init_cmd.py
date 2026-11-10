@@ -14,6 +14,7 @@ nothing is written at all, so a half-initialised repository cannot result.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from dataclasses import dataclass, field
@@ -33,7 +34,8 @@ CONFIG_PATH = "proofcheck.toml"
 INSTALL_COMMANDS = {
     "pytest": 'pip install -e ".[dev]" pytest || pip install pytest',
     "unittest": 'pip install -e ".[dev]" || pip install -e . || true',
-    "jest": "npm ci",
+    "jest": "",
+    "vitest": "",
     "cargo": "",  # cargo builds the crates itself while testing
 }
 
@@ -41,7 +43,7 @@ INSTALL_COMMANDS = {
 SKIP_DIRS = frozenset({"examples", "example", "fixtures", "node_modules", ".venv", "venv", "target", "vendor",
                        "packaging", "docs", "doc", "build", "dist", "__pycache__"})
 MAX_PROJECT_DEPTH = 3
-_ROOT_NAMES = {"cargo": "rust", "pytest": "python", "unittest": "python", "jest": "js"}
+_ROOT_NAMES = {"cargo": "rust", "pytest": "python", "unittest": "python", "jest": "js", "vitest": "js"}
 
 
 class InitError(RuntimeError):
@@ -77,23 +79,174 @@ def _read(p: Path) -> str:
         return ""
 
 
+def _package_json_data(path: Path) -> dict | None:
+    try:
+        data = json.loads(_read(path) or "{}")
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _workspace_pattern_matches(relative: str, pattern: str) -> bool:
+    """Match npm workspace globs without allowing ``*`` to cross directories."""
+    relative_parts = relative.split("/")
+    pattern_parts = pattern.replace("\\", "/").strip("/").split("/")
+
+    def matches(path_i: int, pattern_i: int) -> bool:
+        if pattern_i == len(pattern_parts):
+            return path_i == len(relative_parts)
+        part = pattern_parts[pattern_i]
+        if part == "**":
+            return matches(path_i, pattern_i + 1) or (
+                path_i < len(relative_parts) and matches(path_i + 1, pattern_i)
+            )
+        return (
+            path_i < len(relative_parts)
+            and fnmatch.fnmatchcase(relative_parts[path_i], part)
+            and matches(path_i + 1, pattern_i + 1)
+        )
+
+    return matches(0, 0)
+
+
+def _workspace_patterns(data: dict | None) -> list[str]:
+    workspaces = data.get("workspaces") if data else None
+    patterns = workspaces if isinstance(workspaces, list) else (
+        workspaces.get("packages") if isinstance(workspaces, dict) else None
+    )
+    return [pattern for pattern in patterns if isinstance(pattern, str)] if isinstance(patterns, list) else []
+
+
+def _npm_workspace_members(root: Path, workspace_root: Path) -> list[Path]:
+    data = _package_json_data(workspace_root / "package.json")
+    patterns = _workspace_patterns(data)
+    if not patterns:
+        return []
+    members: list[Path] = []
+    for package_json in root.rglob("package.json"):
+        package_dir = package_json.parent
+        if package_dir == workspace_root or "node_modules" in package_dir.parts:
+            continue
+        relative = package_dir.relative_to(workspace_root).as_posix()
+        if any(_workspace_pattern_matches(relative, pattern) for pattern in patterns):
+            members.append(package_dir)
+    return members
+
+
+def _npm_workspace_root(root: Path, package_dir: Path) -> Path | None:
+    """Return the nearest npm workspace root containing ``package_dir``."""
+    current = package_dir.parent
+    while True:
+        try:
+            current.relative_to(root)
+        except ValueError:
+            break
+        data = _package_json_data(current / "package.json")
+        patterns = _workspace_patterns(data)
+        if patterns:
+            relative = package_dir.relative_to(current).as_posix()
+            if any(_workspace_pattern_matches(relative, pattern) for pattern in patterns):
+                return current
+        if current == root:
+            break
+        current = current.parent
+    return None
+
+
+def _npm_lockfile(package_dir: Path) -> Path | None:
+    for name in ("package-lock.json", "npm-shrinkwrap.json"):
+        candidate = package_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _validate_npm_projects(root: Path, projects: list[DetectedProject], runner: str | None = None) -> None:
+    """Reject npm setup that cannot run ``npm ci`` from the configured project."""
+    npm_projects = [p for p in projects if p.runner in ("jest", "vitest")]
+    if runner in ("jest", "vitest") and not npm_projects:
+        npm_projects = [DetectedProject("root", ".", runner, "given with --runner")]
+    for project in npm_projects:
+        package_dir = root / project.path
+        workspace_root = _npm_workspace_root(root, package_dir) if project.path != "." else None
+        install_dir = workspace_root or package_dir
+        if not (package_dir / "package.json").is_file():
+            raise InitError(
+                f"{project.runner} requires package.json at {project.path!r}; "
+                "add it before using npm setup"
+            )
+        if _npm_lockfile(install_dir) is None:
+            lock_scope = install_dir.relative_to(root).as_posix() if install_dir != root else "repository root"
+            raise InitError(
+                f"{project.runner} setup uses npm ci, which requires a committed "
+                f"package-lock.json or npm-shrinkwrap.json at the {lock_scope}; "
+                "run npm install and commit the lockfile"
+            )
+
+
+def _script_frameworks(scripts: dict) -> set[str]:
+    frameworks: set[str] = set()
+    relevant = {key: value for key, value in scripts.items()
+                if key == "test" or key.startswith("test:")}
+    for command in relevant.values():
+        text = str(command)
+        if re.search(r"\bjest\b", text):
+            frameworks.add("jest")
+        if re.search(r"\bvitest\b", text):
+            frameworks.add("vitest")
+    return frameworks
+
+
+def _package_frameworks(data: dict) -> set[str]:
+    frameworks: set[str] = set()
+    for key in ("dependencies", "devDependencies"):
+        deps = data.get(key)
+        if isinstance(deps, dict):
+            if "jest" in deps:
+                frameworks.add("jest")
+            if "vitest" in deps:
+                frameworks.add("vitest")
+    return frameworks
+
+
+def _workspace_frameworks(root: Path) -> set[str]:
+    frameworks: set[str] = set()
+    for member in _npm_workspace_members(root, root):
+        data = _package_json_data(member / "package.json")
+        if data is not None:
+            script_frameworks = _script_frameworks(data.get("scripts", {}) if isinstance(data.get("scripts"), dict) else {})
+            member_frameworks = script_frameworks or _package_frameworks(data)
+            frameworks.update(member_frameworks)
+    return frameworks
+
+
 def detect_runner(repo: str | Path) -> tuple[str, str]:
     """Return ``(runner, reason)`` for the repository at ``repo``."""
     root = Path(repo)
     pkg = root / "package.json"
     if pkg.is_file():
-        try:
-            data = json.loads(_read(pkg) or "{}")
-        except ValueError:
-            data = {}
-        if isinstance(data, dict):
-            deps: dict = {}
-            for key in ("dependencies", "devDependencies"):
-                if isinstance(data.get(key), dict):
-                    deps.update(data[key])
+        data = _package_json_data(pkg)
+        if data is not None:
             scripts = data.get("scripts") if isinstance(data.get("scripts"), dict) else {}
-            if "jest" in deps or "jest" in str(scripts.get("test", "")) or "jest" in data:
-                return "jest", "package.json uses jest"
+            script_frameworks = _script_frameworks(scripts)
+            root_frameworks = script_frameworks or _package_frameworks(data)
+            workspace_frameworks = _workspace_frameworks(root)
+            frameworks = root_frameworks | workspace_frameworks
+            if len(frameworks) > 1:
+                if workspace_frameworks:
+                    reason = "package.json and workspace packages use both Jest and Vitest"
+                elif script_frameworks:
+                    reason = "package.json has mixed Jest/Vitest test scripts"
+                else:
+                    reason = "package.json has both Jest and Vitest dependencies"
+                return "ambiguous", f"{reason}; specify --runner jest or --runner vitest"
+            if frameworks:
+                runner = next(iter(frameworks))
+                if workspace_frameworks and not root_frameworks:
+                    return runner, f"workspace package.json uses {runner}"
+                if script_frameworks:
+                    return runner, f"package.json test scripts use {runner}"
+                return runner, f"package.json uses {runner}"
     pyproject = _read(root / "pyproject.toml")
     if "[tool.pytest" in pyproject or re.search(r"""["']pytest\b""", pyproject):
         return "pytest", "pyproject.toml mentions pytest"
@@ -108,10 +261,10 @@ def detect_runner(repo: str | Path) -> tuple[str, str]:
     for d in ("tests", "test"):
         if (root / d).is_dir() and any((root / d).rglob("test_*.py")):
             return "pytest", f"{d}/ directory found (pytest also runs unittest-style tests)"
-    return "unittest", "no pytest or jest configuration found; using the stdlib unittest runner"
+    return "unittest", "no pytest, jest or vitest configuration found; using the stdlib unittest runner"
 
 
-_FALLBACK_REASON = "no pytest or jest configuration found"
+_FALLBACK_REASON = "no pytest, jest or vitest configuration found"
 
 
 def _is_maturin(pyproject_text: str) -> bool:
@@ -120,21 +273,20 @@ def _is_maturin(pyproject_text: str) -> bool:
 
 def _package_json_test(path: Path) -> tuple[bool, str]:
     """``(has_test_script, runner_or_reason)`` for a package.json."""
-    try:
-        data = json.loads(_read(path) or "{}")
-    except ValueError:
+    data = _package_json_data(path)
+    if data is None:
+        if _read(path).strip():
+            return False, "package.json is not an object or is not valid JSON"
         return False, "package.json is not valid JSON"
-    if not isinstance(data, dict):
-        return False, "package.json is not an object"
     scripts = data.get("scripts") if isinstance(data.get("scripts"), dict) else {}
     test = str(scripts.get("test", ""))
+    runner, reason = detect_runner(path.parent)
+    if runner in ("jest", "vitest", "ambiguous"):
+        return True, runner if runner != "ambiguous" else reason
     if not test or "no test specified" in test:
         return False, "package.json has no test script"
-    runner, _ = detect_runner(path.parent)
-    if runner == "jest":
-        return True, "jest"
     shown = test if len(test) <= 60 else test[:59] + "…"
-    return True, f"its test script ({shown}) does not use jest, the only JavaScript runner proofcheck supports"
+    return True, f"its test script ({shown}) does not use jest; supported JavaScript runners are Jest and Vitest"
 
 
 def detect_root_project(root: Path) -> tuple[str, str, bool]:
@@ -200,9 +352,11 @@ def detect_projects(repo: str | Path) -> tuple[list[DetectedProject], list[tuple
                 projects.append(DetectedProject("", rel, runner, f"{manifest}: {reason}"))
                 return
         if (d / "package.json").is_file():
+            if _npm_workspace_root(root, d) is not None:
+                return
             has_test, what = _package_json_test(d / "package.json")
-            if has_test and what == "jest":
-                projects.append(DetectedProject("", rel, "jest", "package.json uses jest"))
+            if has_test and what in ("jest", "vitest"):
+                projects.append(DetectedProject("", rel, what, f"package.json uses {what}"))
             elif has_test:
                 skipped.append((f"{rel}/package.json", what))
 
@@ -238,13 +392,13 @@ def install_command(projects: list[DetectedProject]) -> str:
         if p.runner == "cargo":
             continue
         if p.path == ".":
-            parts.append(INSTALL_COMMANDS[p.runner])
+            command = INSTALL_COMMANDS[p.runner]
+            if command:
+                parts.append(command)
         elif p.runner == "pytest":
             parts.append(f'pip install -e "./{p.path}[dev]" pytest || pip install pytest')
         elif p.runner == "unittest":
             parts.append(f'pip install -e "./{p.path}[dev]" || pip install -e "./{p.path}" || true')
-        elif p.runner == "jest":
-            parts.append(f'npm ci --prefix "{p.path}"')
     return "; ".join(parts)
 
 
@@ -256,7 +410,7 @@ def _yaml_str(s: str) -> str:
 
 def _extra_inputs(runners: list[str]) -> str:
     out = ""
-    if "jest" in runners:
+    if "jest" in runners or "vitest" in runners:
         out += '      node-version: "20"\n'
     if "cargo" in runners:
         out += "      timeout-minutes: 90   # Rust: compiling the workspace for base, head and ablation takes a while\n"
@@ -338,7 +492,7 @@ jobs:
 
 def agent_caller(ref: str, runner: str = "pytest", install: str | None = None, runners: list[str] | None = None) -> str:
     prefix = f"{TOOL_REPOSITORY}/.github/workflows"
-    node = '      node-version: "20"\n' if "jest" in (runners or [runner]) else ""
+    node = '      node-version: "20"\n' if any(r in ("jest", "vitest") for r in (runners or [runner])) else ""
     install = INSTALL_COMMANDS.get(runner, INSTALL_COMMANDS["pytest"]) if install is None else install
     return f"""# proofcheck agent evidence (EXPERIMENTAL, opt-in).
 #
@@ -415,6 +569,8 @@ def projects_toml(projects: list[DetectedProject]) -> str:
            "# runner, test_command, setup_command, test_paths, timeout, test_env, cargo_target_dir."]
     for p in projects:
         out += ["", "[[project]]", f"name = {_toml_str(p.name)}", f"path = {_toml_str(p.path)}", f"runner = {_toml_str(p.runner)}"]
+        if p.runner in ("jest", "vitest"):
+            out.append('setup_command = "npm ci"  # requires a committed package-lock.json or npm-shrinkwrap.json')
         if p.runner == "cargo":
             out.append("# timeout = 1800                   # seconds per run (cargo default: 30 minutes)")
     return "\n".join(out) + "\n"
@@ -426,7 +582,7 @@ def config_template(runner: str, agent: bool = False, projects: list[DetectedPro
 # Read from the pull request's BASE commit, so a PR cannot weaken its own
 # check. Every key is optional; the commented values are the defaults.
 
-runner = "{runner}"                 # pytest | unittest | jest | cargo
+runner = "{runner}"                 # pytest | unittest | jest | vitest | cargo
 # test_command = ""                 # custom command; placeholders {{junitxml}} and {{tests}}
 # setup_command = ""                # run once in each worktree before the tests
 # timeout = 600                     # seconds per test run
@@ -459,6 +615,9 @@ time_budget_s = 300
 # when = "missing-evidence"         # or "always"
 # test_dir = "tests/proofcheck_agent"
 """
+    if runner in ("jest", "vitest") and not projects:
+        text = text.replace('# setup_command = ""                # run once in each worktree before the tests',
+                            'setup_command = "npm ci"  # requires a committed package-lock.json or npm-shrinkwrap.json')
     if agent:
         # proofcheck-agent.yml only proposes tests when [agent] is enabled in the
         # base commit's config, so `init --agent` must switch it on.
@@ -493,8 +652,11 @@ def init_repo(repo: str | Path = ".", agent: bool = False, force: bool = False, 
         projects, skipped = detect_projects(root)
         root_runner, reason, _ = detect_root_project(root)
         root_proj = next((p for p in projects if p.path == "."), None)
+        if root_proj is not None and root_proj.runner == "ambiguous":
+            raise InitError(root_proj.reason)
         detected = root_proj.runner if root_proj else root_runner
         reason = root_proj.reason if root_proj else reason
+    _validate_npm_projects(root, projects, detected if runner else None)
     multi = len(projects) > 1
     runners = sorted({p.runner for p in projects}) if multi else [detected]
     install = install_command(projects) if multi else None

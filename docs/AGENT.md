@@ -398,8 +398,8 @@ Environment variables: `PROOFCHECK_LLM_PROVIDER` (`anthropic` or `openai`),
 
 ## Limitations
 
-* **Python and Rust only.** Python with pytest or unittest; Rust with cargo.
-  Jest projects get an `error` status.
+* **Python, JavaScript and Rust.** Python with pytest or unittest; JavaScript
+  with Vitest (Jest remains experimental); Rust with cargo.
 * **Rust: integration tests only, public API only.** The candidate is a
   separate test crate, so private functions, private modules and items
   behind `#[cfg(test)]` are out of reach, and a bug that cannot be triggered
