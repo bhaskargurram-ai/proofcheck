@@ -74,6 +74,15 @@ class RunCommandTest(RepoTestCase):
         self.assertEqual(perf["status"], "verified", (perf, result["benchmark"]))
         self.assertGreater(result["benchmark"]["speedup"], 2)
 
+    def test_runner_choice_accepts_supported_values_and_rejects_invalid(self):
+        runner = CliRunner()
+        for name in ("pytest", "unittest", "jest", "vitest", "cargo"):
+            result = runner.invoke(cli.main, ["run", "--runner", name])
+            self.assertNotIn("Invalid value for '--runner'", result.output, name)
+        invalid = runner.invoke(cli.main, ["run", "--runner", "make"])
+        self.assertNotEqual(invalid.exit_code, 0)
+        self.assertIn("Invalid value for '--runner'", invalid.output)
+
 
 class CommentCommandTest(unittest.TestCase):
     def setUp(self):

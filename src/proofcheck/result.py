@@ -30,7 +30,7 @@ ABLATION_STATUSES = ("ran", "not_applicable", "no_hunks", "baseline_failed", "er
 HUNK_STATUSES = ("required", "not_exercised", "skipped", "docs_only")
 HUNK_KINDS = ("modify", "add", "delete", "rename")
 BASE_FAILURE_KINDS = ("build",)
-RUNNER_NAMES = ("pytest", "unittest", "jest", "cargo")
+RUNNER_NAMES = ("pytest", "unittest", "jest", "vitest", "cargo")
 _PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
 
 MAX_STR = 2000

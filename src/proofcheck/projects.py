@@ -34,6 +34,8 @@ API used by the fail-to-pass check, the diff evidence map and the agent:
 from __future__ import annotations
 
 import os
+import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -283,12 +285,50 @@ def setup_projects(projects: Sequence[Project], worktree: Path, env: Mapping[str
         wd = p.workdir(worktree)
         if not wd.is_dir():
             continue
-        r = run_command(p.setup_command, cwd=wd, env=p.env(env), timeout=p.timeout)
+        command = list(p.setup_command)
+        if p.runner.name in ("jest", "vitest") and command == ["npm", "ci"]:
+            command, resolution_error = _npm_ci_command()
+            if resolution_error:
+                where = worktree.name if p.is_root else f"{worktree.name}/{p.path}"
+                notes.append(f"setup_command failed in {where}: {resolution_error}")
+                continue
+        r = run_command(command, cwd=wd, env=p.env(env), timeout=p.timeout)
         if not r.ok:
             why = "timed out" if r.timed_out else (r.launch_error or f"exit code {r.returncode}")
             where = worktree.name if p.is_root else f"{worktree.name}/{p.path}"
             notes.append(f"setup_command failed in {where}: {why}")
     return notes
+
+
+def _npm_ci_command() -> tuple[list[str], str | None]:
+    """Resolve generated ``npm ci`` to a direct Node invocation."""
+    node = shutil.which("node")
+    if not node:
+        return [], "Node.js executable not found on PATH"
+    npm = shutil.which("npm")
+    candidates: list[Path] = []
+    if npm:
+        npm_path = Path(npm)
+        resolved_npm_path = npm_path.resolve()
+        if resolved_npm_path.name.lower() == "npm-cli.js" and resolved_npm_path.is_file():
+            candidates.append(resolved_npm_path)
+        candidates.append(npm_path.parent / "node_modules" / "npm" / "bin" / "npm-cli.js")
+        if npm_path.suffix.lower() in (".cmd", ".ps1"):
+            try:
+                text = npm_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            match = re.search(r"node_modules[\\/]+npm[\\/]+bin[\\/]+npm-cli\.js", text, re.IGNORECASE)
+            if match:
+                relative = Path(*re.split(r"[\\/]+", match.group(0)))
+                candidates.append(npm_path.parent / relative)
+    node_path = Path(node)
+    candidates.append(node_path.parent / "node_modules" / "npm" / "bin" / "npm-cli.js")
+    candidates.append(node_path.parent.parent / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js")
+    for candidate in candidates:
+        if candidate.is_file():
+            return [node, str(candidate), "ci"], None
+    return [], "npm CLI (npm-cli.js) not found for the Node.js installation"
 
 
 _NO_TEST_FILES = "The PR does not add or modify any test files."
